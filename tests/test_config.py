@@ -74,13 +74,14 @@ def test_unknown_catalog_profile_raises(monkeypatch):
         load_config()
 
 
-def test_sqlite_profile_requires_catalog_uri(monkeypatch):
-    """The sqlite catalog profile requires CATALOG_URI."""
+def test_sqlite_profile_default_catalog_uri(monkeypatch):
+    """The sqlite catalog profile falls back to the documented CATALOG_URI default."""
     monkeypatch.setenv("CATALOG_PROFILE", "sqlite")
     monkeypatch.setenv("STORAGE_PROFILE", "filesystem")
     monkeypatch.setenv("FS_PATH", "./data/warehouse")
     monkeypatch.setenv("WAREHOUSE", "data/warehouse")
     monkeypatch.delenv("CATALOG_URI", raising=False)
     monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
-    with pytest.raises(RuntimeError, match="CATALOG_URI"):
-        load_config()
+    cfg = load_config()
+    assert cfg["catalog_profile"] == "sqlite"
+    assert cfg["catalog_uri"] == "sqlite:///.lakebranch/catalog.db"

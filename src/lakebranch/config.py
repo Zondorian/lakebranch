@@ -84,11 +84,11 @@ def load_config() -> dict[str, str]:
         "warehouse": os.getenv("WAREHOUSE", "warehouse"),
     }
 
-    # Load profile-specific variables
+    # Load profile-specific variables (never clobber the defaults above)
     for var in PROFILE_REQUIRED_VARS[storage_profile]:
-        config[var.lower()] = os.getenv(var, "")
+        config.setdefault(var.lower(), os.getenv(var, ""))
     for var in CATALOG_REQUIRED_VARS[catalog_profile]:
-        config[var.lower()] = os.getenv(var, "")
+        config.setdefault(var.lower(), os.getenv(var, ""))
 
     # Validate required variables
     missing = []
