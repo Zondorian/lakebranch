@@ -3,7 +3,7 @@
 [![CI](https://github.com/USERNAME/lakebranch/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/lakebranch/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-**Lakebranch** is a local, self-contained Iceberg data lake stack built on **Nessie** (Iceberg REST catalog) and **SeaweedFS** (S3-compatible object storage). It provides a fully working end-to-end pipeline for writing and querying Apache Iceberg tables entirely on your local machine — no cloud accounts, no external services.
+**Lakebranch** is a local, self-contained Iceberg data lake stack. The default stack is built on **Nessie** (Iceberg REST catalog) and **SeaweedFS** (S3-compatible object storage), but a **Docker-free** profile (SQLite catalog + local filesystem) is also available. It provides a fully working end-to-end pipeline for writing and querying Apache Iceberg tables entirely on your local machine — no cloud accounts, no external services.
 
 ```
 ┌─────────────┐     ┌──────────────┐     ┌────────────────────┐
@@ -11,6 +11,12 @@
 │  (Client)   │     │ REST Catalog │     │  S3 Object Store   │
 │             │     │  :19120      │     │  :9000 / :9333     │
 └─────────────┘     └──────────────┘     └────────────────────┘
+
+   ── or, Docker-free (no containers at all) ──
+┌─────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│  PyIceberg  │────▶│  SQLite Catalog  │────▶│  Local Filesystem│
+│  (Client)   │     │  (CATALOG_URI)   │     │  (FS_PATH)       │
+└─────────────┘     └──────────────────┘     └──────────────────┘
 ```
 
 ## Architecture
@@ -19,9 +25,10 @@
 |-----------|------|-------|
 | **SeaweedFS** | S3-compatible object storage that physically stores Iceberg table data (Parquet files, manifests, metadata) | `9000` (S3 API), `9333` (Master), `8080` (Volume) |
 | **Nessie** | Git-like Iceberg REST catalog server that tracks table metadata, schemas, and snapshots | `19120` (REST API) |
-| **PyIceberg** | Python client that talks to Nessie via the Iceberg REST protocol and reads/writes data through SeaweedFS | — |
+| **PyIceberg** | Python client that talks to the catalog via the Iceberg protocol and reads/writes data through the storage layer | — |
+| **SQLite catalog** *(optional)* | Local file-based Iceberg catalog (PyIceberg `SqlCatalog`) — no server needed; pairs with `STORAGE_PROFILE=filesystem` | — |
 
-The warehouse is a single SeaweedFS bucket named `warehouse`. Nessie is configured to use this bucket as the default warehouse location, and PyIceberg connects to Nessie's REST endpoint to manage namespaces and tables.
+The warehouse is a single SeaweedFS bucket named `warehouse`. Nessie is configured to use this bucket as the default warehouse location, and PyIceberg connects to Nessie's REST endpoint to manage namespaces and tables. With the SQLite catalog profile, the warehouse is a local directory and the catalog metadata lives in a local `catalog.db` file.
 
 ## Prerequisites
 
@@ -81,7 +88,7 @@ With the virtual environment active, install the project dependencies:
 pip install -r requirements.txt
 ```
 
-This installs `pyiceberg[s3fs,pyarrow]`, `pandas`, `duckdb`, and `python-dotenv`.
+This installs `pyiceberg[s3fs,pyarrow,sql-sqlite]`, `pandas`, `duckdb`, and `python-dotenv`.
 
 > **Note:** The `.venv/` directory is already excluded via `.gitignore`, so it won't be committed to version control.
 
@@ -125,6 +132,59 @@ Query result (3 rows):
 ```
 
 > **Note:** The script is idempotent. Re-running it will reuse the existing bucket, namespace, and table, and append 3 more rows each time.
+
+## Docker-Free Quick Start (SQLite Catalog + Local Filesystem)
+
+Lakebranch can run the **entire end-to-end pipeline with no Docker and no containers at all** — just `pip install`. This pairs the [SQLite catalog](https://py.iceberg.apache.org/) (a single local `catalog.db` file) with the local filesystem storage provider (`STORAGE_PROFILE=filesystem`). It is ideal for quick prototyping, tests, and CI.
+
+### 1. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 2. Configure the environment
+
+Set the two profile variables in your `.env` (or export them in your shell):
+
+```bash
+STORAGE_PROFILE=filesystem
+CATALOG_PROFILE=sqlite
+FS_PATH=./data/warehouse          # local warehouse directory (git-ignored)
+CATALOG_URI=sqlite:///.lakebranch/catalog.db   # local SQLite catalog (git-ignored)
+WAREHOUSE=data/warehouse
+```
+
+### 3. Run the pipeline
+
+```bash
+python -m src.lakebranch.write_iceberg
+# ...or the installable CLI:
+lakebranch pipeline
+```
+
+Expected output (abbreviated):
+
+```
+[fs] Ensured warehouse directory: data/warehouse
+[iceberg] Ensuring table 'db.events' exists
+[iceberg] Table 'db.events' ready.
+[iceberg] Appending 3 sample event rows
+[iceberg] Data appended successfully.
+[iceberg] Scanning table 'db.events'
+
+Query result (3 rows):
+   event_id event_type              timestamp
+0         1      login  2026-07-31T10:00:00Z
+1         2   purchase  2026-07-31T10:05:00Z
+2         3     logout  2026-07-31T10:10:00Z
+
+[done] All operations completed successfully.
+```
+
+The same pipeline code works unchanged — only the catalog/storage profile selection differs. The `lakebranch init-demo`, GUI, run-logging, and Airflow provider all work with this profile too.
+
+> **Note:** The SQLite catalog is a **single-user, file-based catalog** — no network, no server. It is perfect for local dev, tests, and CI. For production or multi-writer scenarios, use the Nessie profile (see [Quick Start](#quick-start)).
 
 ## Nessie UI (Catalog Explorer)
 
@@ -363,7 +423,7 @@ Lakebranch ships a clean storage abstraction layer in `src/lakebranch/storage/` 
 ┌──────────────────────────────────────────────┐
 │         Lakebranch Pipeline (write_iceberg)    │
 └────────────────────┬─────────────────────────┘
-                     │ load_config() + get_provider()
+                     │ load_config() + get_provider() + init_catalog()
 ┌────────────────────▼─────────────────────────┐
 │         Storage Abstraction Layer            │
 │   src/lakebranch/storage/                      │
@@ -375,7 +435,9 @@ Lakebranch ships a clean storage abstraction layer in `src/lakebranch/storage/` 
 └────────────────────┬─────────────────────────┘
                      │ S3 API / local path
 ┌────────────────────▼─────────────────────────┐
-│         Nessie REST Catalog (:19120)         │
+│  Catalog (selected via CATALOG_PROFILE)      │
+│  ├── Nessie REST Catalog (:19120)   [nessie] │
+│  └── SQLite Catalog (local file)    [sqlite] │
 └──────────────────────────────────────────────┘
 ```
 
@@ -394,10 +456,10 @@ The `STORAGE_PROFILE` environment variable selects the backend at runtime — sw
 
 ### Can I use a different storage backend?
 
-Yes, with some configuration changes. Iceberg separates the **catalog** (metadata) from the **storage** (data files). Lakebranch currently uses:
+Yes, with some configuration changes. Iceberg separates the **catalog** (metadata) from the **storage** (data files). Lakebranch's default stack uses:
 
-- **Catalog:** Nessie (Iceberg REST catalog)
-- **Storage:** SeaweedFS (S3-compatible object storage)
+- **Catalog:** Nessie (Iceberg REST catalog) — or SQLite (`CATALOG_PROFILE=sqlite`) for a Docker-free stack
+- **Storage:** SeaweedFS (S3-compatible object storage) — or the local filesystem (`STORAGE_PROFILE=filesystem`)
 
 You can swap out the storage layer for other S3-compatible or cloud options:
 
@@ -408,22 +470,22 @@ You can swap out the storage layer for other S3-compatible or cloud options:
 | **AWS S3** | Cloud, S3-native | Use `docker-compose.prod-s3.yml` — no code changes | `aws-s3` |
 | **Google Cloud Storage (GCS)** | Cloud, S3-compatible | Use the GCS S3 interoperability endpoint (`https://storage.googleapis.com`) with GCS HMAC keys | `gcs` (planned) |
 | **Azure Blob Storage** | Cloud, S3-compatible | Use the Azure Blob S3-compatible endpoint with Azure storage account credentials | `adls` (planned) |
-| **Local filesystem** | Local, non-S3 | Requires switching the catalog to a filesystem-based catalog (e.g., `sqlite` or `hadoop`) and changing `warehouse.location` to a local path | `filesystem` |
+| **Local filesystem** | Local, non-S3 | Set `CATALOG_PROFILE=sqlite` + `STORAGE_PROFILE=filesystem` for a Docker-free stack; catalog metadata lives in a local `catalog.db` and data in `FS_PATH` | `filesystem` |
 
 ### Can I use a local database instead of Nessie?
 
 Yes. Nessie is one of several Iceberg catalog implementations. PyIceberg supports multiple catalog types:
 
-| Catalog | Type | Notes |
-|---------|------|-------|
-| **Nessie** (current) | REST catalog with Git-like versioning | Already configured — no changes needed |
-| **SQLite** | Local file-based catalog | Simple, single-user, no server needed |
-| **PostgreSQL** | Database-backed catalog | Requires a running PostgreSQL instance |
-| **Hive Metastore** | Traditional Hive catalog | Requires a Hive Metastore service |
-| **Glue** | AWS-managed catalog | Requires AWS account |
-| **In-memory** | Ephemeral catalog | Data lost on process exit; useful for testing only |
+| Catalog | Profile | Type | Notes |
+|---------|---------|------|-------|
+| **Nessie** (default) | `nessie` | REST catalog with Git-like versioning | Already configured — no changes needed |
+| **SQLite** | `sqlite` | Local file-based catalog | Simple, single-user, no server needed; pairs with `STORAGE_PROFILE=filesystem` for a Docker-free stack |
+| **PostgreSQL** | — | Database-backed catalog | Requires a running PostgreSQL instance |
+| **Hive Metastore** | — | Traditional Hive catalog | Requires a Hive Metastore service |
+| **Glue** | — | AWS-managed catalog | Requires AWS account |
+| **In-memory** | — | Ephemeral catalog | Data lost on process exit; useful for testing only |
 
-To switch catalogs, you would modify the `load_catalog()` call in `src/lakebranch/write_iceberg.py` and update the corresponding `.env` variables. The current setup is intentionally wired for Nessie + SeaweedFS as the simplest fully-local combination.
+Switch catalogs by setting `CATALOG_PROFILE` in `.env` (`nessie` | `sqlite`); `src/lakebranch/catalog.py` routes to the right PyIceberg catalog automatically. The default setup is wired for Nessie + SeaweedFS as the simplest fully-local combination, and `sqlite` + `filesystem` as the Docker-free combination.
 
 ## Configuration
 
@@ -434,10 +496,12 @@ All configuration is driven by the `.env` file at the project root:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `STORAGE_PROFILE` | Object storage backend (`seaweedfs`, `minio`, `aws-s3`, `gcs`, `adls`, `filesystem`) | `seaweedfs` |
+| `CATALOG_PROFILE` | Iceberg catalog backend (`nessie` \| `sqlite`) | `nessie` |
 | `MINIO_ROOT_USER` | Object store root access key (also used by Nessie via AWS credentials) | `minioadmin` |
 | `MINIO_ROOT_PASSWORD` | Object store root secret key (also used by Nessie via AWS credentials) | `minioadmin` |
-| `NESSIE_URI` | Nessie REST catalog endpoint used by PyIceberg | `http://localhost:19120/iceberg/main` |
-| `WAREHOUSE` | Name of the warehouse (maps to the object store bucket) | `warehouse` |
+| `NESSIE_URI` | Nessie REST catalog endpoint used by PyIceberg (profile: `nessie`) | `http://localhost:19120/iceberg/main` |
+| `CATALOG_URI` | SQLAlchemy URI for the SQLite catalog DB (profile: `sqlite`) | `sqlite:///.lakebranch/catalog.db` |
+| `WAREHOUSE` | Name of the warehouse (maps to the object store bucket or local directory) | `warehouse` |
 | `S3_ENDPOINT` | S3 API endpoint used by PyIceberg/s3fs | `http://localhost:9000` |
 | `S3_ACCESS_KEY` | S3 access key for PyIceberg/s3fs | `minioadmin` |
 | `S3_SECRET_KEY` | S3 secret key for PyIceberg/s3fs | `minioadmin` |

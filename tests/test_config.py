@@ -39,3 +39,48 @@ def test_missing_required_vars_raises(monkeypatch):
     monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
     with pytest.raises(RuntimeError, match="Missing required environment variables"):
         load_config()
+
+
+def test_default_catalog_profile_nessie(monkeypatch):
+    monkeypatch.delenv("CATALOG_PROFILE", raising=False)
+    monkeypatch.setenv("STORAGE_PROFILE", "filesystem")
+    monkeypatch.setenv("FS_PATH", "./data/warehouse")
+    monkeypatch.setenv("WAREHOUSE", "data/warehouse")
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    cfg = load_config()
+    assert cfg["catalog_profile"] == "nessie"
+    assert cfg["nessie_uri"] == "http://localhost:19120/iceberg/main"
+
+
+def test_sqlite_catalog_profile(monkeypatch):
+    monkeypatch.setenv("CATALOG_PROFILE", "sqlite")
+    monkeypatch.setenv("STORAGE_PROFILE", "filesystem")
+    monkeypatch.setenv("FS_PATH", "./data/warehouse")
+    monkeypatch.setenv("WAREHOUSE", "data/warehouse")
+    monkeypatch.setenv("CATALOG_URI", "sqlite:///tmp/catalog.db")
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    cfg = load_config()
+    assert cfg["catalog_profile"] == "sqlite"
+    assert cfg["catalog_uri"] == "sqlite:///tmp/catalog.db"
+
+
+def test_unknown_catalog_profile_raises(monkeypatch):
+    monkeypatch.setenv("CATALOG_PROFILE", "bogus")
+    monkeypatch.setenv("STORAGE_PROFILE", "filesystem")
+    monkeypatch.setenv("FS_PATH", "./data/warehouse")
+    monkeypatch.setenv("WAREHOUSE", "data/warehouse")
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    with pytest.raises(ValueError, match="Unknown CATALOG_PROFILE"):
+        load_config()
+
+
+def test_sqlite_profile_requires_catalog_uri(monkeypatch):
+    """The sqlite catalog profile requires CATALOG_URI."""
+    monkeypatch.setenv("CATALOG_PROFILE", "sqlite")
+    monkeypatch.setenv("STORAGE_PROFILE", "filesystem")
+    monkeypatch.setenv("FS_PATH", "./data/warehouse")
+    monkeypatch.setenv("WAREHOUSE", "data/warehouse")
+    monkeypatch.delenv("CATALOG_URI", raising=False)
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    with pytest.raises(RuntimeError, match="CATALOG_URI"):
+        load_config()

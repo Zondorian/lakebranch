@@ -10,19 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Shared catalog helper module** (`src/lakebranch/catalog.py`): single source of truth for PyIceberg catalog bootstrap (`init_catalog`, `ensure_namespace`, `ensure_table`). Replaces the catalog logic previously duplicated across the CLI pipeline, demo loader, GUI API, and Airflow DAG/hook. New consumers get race-safe namespace/table creation and consistent error handling by default.
+- **Profile-aware config loader** (`src/lakebranch/config.py`): adds `CATALOG_PROFILE` (`nessie` | `sqlite`) and `CATALOG_URI` so the Iceberg catalog backend is selected alongside the storage profile. The Nessie defaults are unchanged.
 
 ### Added
 
-- **GUI write support**: the table detail view now has an **Import Data** panel. Upload a CSV/Parquet file or paste JSON rows, choose `append` / `overwrite`, and the data is written to the table — creating it automatically (schema inferred) if it does not exist. Writes are recorded in the run log (`gui_upload` / `gui_write_rows` pipelines). New API endpoints: `POST /api/namespaces`, `POST /api/tables/{table}/data`, `POST /api/tables/{table}/rows`.
-- `python-multipart` added to `requirements-gui.txt` and the `gui` extra (required for file uploads).
-- Unit tests for `src.lakebranch.catalog` (8 tests: namespace/table creation, idempotency, race-safety).
+- **SQLite catalog profile** (`CATALOG_PROFILE=sqlite`): PyIceberg `SqlCatalog` backed by a single local `.db` file. Pairs with `STORAGE_PROFILE=filesystem` for a **fully Docker-free stack** — the entire end-to-end write/query pipeline runs with just `pip install`, no containers, no network.
+- **`init_catalog()` catalog routing** (`src/lakebranch/catalog.py`): routes to the Nessie REST catalog (`nessie`, default) or the SQLite catalog (`sqlite`) based on `CATALOG_PROFILE`. Handles Windows/macOS/Linux local warehouse paths safely (relative-path rendering with a `file://` cross-drive fallback).
+- **Docker-free quickstart** in the README: `STORAGE_PROFILE=filesystem CATALOG_PROFILE=sqlite` → `lakebranch pipeline` works with no Docker at all. The GUI, `init-demo`, run-logging, and Airflow provider all work with this profile.
+- **Docker-free integration tests** (`tests/test_sqlite_catalog.py`): exercise the real Iceberg write/read path in CI — create namespace → create table → append → scan → idempotent reload — with no Docker or Nessie.
+- `pyiceberg[sql-sqlite]` extra added to `pyproject.toml` and `requirements.txt` (SQLAlchemy for the SQLite catalog).
+- `CATALOG_PROFILE` / `CATALOG_URI` documented in `.env.example` and the README configuration tables.
 
 ### Planned
 
 - GUI: Nessie branch management (create/merge branches)
 - Bundled query engine (e.g. DuckDB via pyiceberg) so quickstart supports SQL out of the box
 - GCS and ADLS storage profiles
-- SQLite / PostgreSQL catalog support
+- PostgreSQL catalog support
 
 ## [0.1.0] - 2026-08-04
 
