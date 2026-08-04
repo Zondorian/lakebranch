@@ -265,6 +265,17 @@ python -m src.lakebranch.sql "SELECT u.email, COUNT(o.order_id) AS orders FROM d
 
 Pass `--limit N` to cap the number of result rows (default: 1000). The engine also drives the GUI's **SQL** panel and the `POST /api/sql` endpoint, so the quickstart supports SQL out of the box — Docker-free included.
 
+## Nessie Branch Management (undo/redo for data)
+
+Nessie's Git-like versioning of the catalog is exposed in the GUI as a **Branches** panel. A new client module — `src/lakebranch/nessie.py` — talks to Nessie's REST **v2 tree API** (`/api/v2/trees`), which is *separate* from the Iceberg REST endpoint that PyIceberg uses (PyIceberg's `RestCatalog` has no branch APIs). It can:
+
+- **List** every branch and tag in the repository, plus the currently selected branch (`GET /api/branches`)
+- **Create** a branch from an existing branch/tag — the "undo/redo" enabler: fork before a destructive write, experiment, then merge back or delete (`POST /api/branches`)
+- **Merge** one branch into another (`POST /api/branches/merge`)
+- **Delete** a branch (`DELETE /api/branches/{name}`)
+
+Branch management requires the Nessie catalog profile (`CATALOG_PROFILE=nessie`, the default). On the Docker-free SQLite catalog (which has no branches/tags) the branch APIs return a clear 400. The client is dependency-light (`requests`) and injectable, so the whole feature is tested Docker-free with a fake HTTP session (`tests/test_nessie.py`, `tests/test_api_branches.py`).
+
 ## Lakebranch GUI (Developer Preview)
 
 Lakebranch ships a **web-based developer preview** — a FastAPI backend + a single-page static UI that makes the lakehouse explorable *and writable* in the browser: tables, row previews, time travel, snapshot diffs, a query runner, CSV/Parquet/JSON import, and run history. It is intentionally minimal and clearly marked as a dev preview: no auth, no user management, no production hardening.
@@ -279,6 +290,7 @@ Lakebranch ships a **web-based developer preview** — a FastAPI backend + a sin
 - **Snapshot Diff** — compare two snapshots and see exactly which rows were added/removed between them (`GET /api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…`)
 - **Query runner** — run an Iceberg scan with a SQL-like row filter (`POST /api/query`, e.g. `event_id > 1` or `event_type = 'login'`)
 - **SQL query runner** — run arbitrary SQL (JOINs, GROUP BY, subqueries) over **every** table in the catalog via DuckDB (`POST /api/sql`). Tables are exposed as sanitized views (`db.events` → `db_events`) and quoted dotted aliases (`"db.events"`)
+- **Branches** — manage Nessie's Git-like branch/tag versioning: fork a branch before destructive writes (the "undo/redo for data" story), merge it back, or delete it (`GET`/`POST /api/branches`, `POST /api/branches/merge`, `DELETE /api/branches/{name}`). Requires the Nessie catalog profile; degrades to a clear 400 on the SQLite profile
 - **Import Data** — upload a CSV/Parquet file or paste JSON rows and write them to a table (`append` / `overwrite`), creating the table automatically (schema inferred) if it does not exist. Writes are recorded in the run log (`POST /api/tables/{table}/data`, `POST /api/tables/{table}/rows`, `POST /api/namespaces`)
 - **Recent runs** — the pipeline run-log entries from [Pipeline Run Logging](#pipeline-run-logging) (`GET /api/runs`)
 
@@ -319,6 +331,10 @@ curl http://localhost:8787/api/runs     # run-log entries (requires the run-logg
 | `GET` | `/api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…` | **Snapshot diff** — rows added/removed between two snapshots |
 | `POST` | `/api/query` | Run an Iceberg scan with a filter expression (body: `{"table": "db.events", "filter": "event_id > 1", "limit": 100}`) |
 | `POST` | `/api/sql` | Run arbitrary SQL (JOINs, GROUP BY, subqueries) over every Iceberg table via DuckDB (body: `{"query": "SELECT event_type, COUNT(*) AS n FROM db_events GROUP BY 1", "limit": 1000}`). Returns the result rows/columns plus the view-name → table-id mapping |
+| `GET` | `/api/branches` | List every Nessie branch/tag and the currently selected branch (`CATALOG_PROFILE=nessie`) |
+| `POST` | `/api/branches` | Create a Nessie branch from an existing branch/tag — the "undo/redo for data" enabler (body: `{"name": "experiment", "from_ref": "main"}`) |
+| `POST` | `/api/branches/merge` | Merge a source branch into a target (body: `{"source": "experiment", "target": "main"}`) |
+| `DELETE` | `/api/branches/{name}` | Delete a Nessie branch |
 | `POST` | `/api/namespaces` | Create a namespace (idempotent) |
 | `POST` | `/api/tables/{table}/rows` | Write JSON rows (append/overwrite) — creates the table (schema inferred) if missing |
 | `POST` | `/api/tables/{table}/data` | Upload a CSV/Parquet file and append/overwrite — creates the table if missing (multipart: `file`, `mode`) |
@@ -607,6 +623,7 @@ Lakebranch/
         ├── init_demo.py          # Multi-table demo dataset loader
         ├── runs.py               # Pipeline run-log (telemetry) layer
         ├── sql.py                # DuckDB SQL-over-Iceberg engine (lakebranch sql / POST /api/sql)
+        ├── nessie.py             # Nessie REST v2 tree-API client (branches/tags: list/create/merge/delete)
         ├── write_iceberg.py      # End-to-end writer/query script
         └── storage/
             ├── __init__.py       # Storage abstraction exports

@@ -14,7 +14,8 @@ A **local, self-contained Apache Iceberg data lake stack**. The default stack is
 - **Storage abstraction layer** (`src/lakebranch/storage/`): a `StorageProvider` protocol (`ensure_warehouse()`, `catalog_properties()`) — swapping SeaweedFS ↔ MinIO ↔ AWS S3 requires **zero pipeline code changes** (selected via `STORAGE_PROFILE` in `.env`; `filesystem` profile exists too).
 - **Catalog abstraction** (`src/lakebranch/catalog.py`): `init_catalog()` routes to Nessie (`nessie`, default) or PyIceberg's SQLite catalog (`sqlite`) based on `CATALOG_PROFILE`. The SQLite catalog pairs with `STORAGE_PROFILE=filesystem` for a fully Docker-free stack.
 - **Run-logging (telemetry, not orchestration):** every pipeline run records one row to a local DuckDB file `.lakebranch/runs.duckdb` (`status`, `rows_written`, `duration_ms`, `error`, …). Usable even when Docker containers are down.
-- **GUI (developer preview):** FastAPI app (`:8787`) + single-page static UI (`src/lakebranch/ui/index.html`) — tables, row previews, time travel, snapshot diffs, a filter-based query runner, a full **SQL query runner** (JOINs/GROUP BY via DuckDB), CSV/Parquet upload + JSON row writes, and recent runs. Fully Apache 2.0.
+- **GUI (developer preview):** FastAPI app (`:8787`) + single-page static UI (`src/lakebranch/ui/index.html`) — tables, row previews, time travel, snapshot diffs, a filter-based query runner, a full **SQL query runner** (JOINs/GROUP BY via DuckDB), **Nessie branch management** (create/merge/delete branches — the "undo/redo for data" story), CSV/Parquet upload + JSON row writes, and recent runs. Fully Apache 2.0.
+- **Nessie tree-API client** (`src/lakebranch/nessie.py`): a thin `requests`-based client for Nessie's REST v2 tree API (`/api/v2/trees`) — lists branches/tags, creates branches, merges, and deletes. Separate from PyIceberg's Iceberg REST client (which has no branch APIs). Powers `GET/POST /api/branches`, `POST /api/branches/merge`, `DELETE /api/branches/{name}`, and the GUI Branches panel.
 - **Bundled SQL engine** (`src/lakebranch/sql.py`): real SQL over the catalog's Iceberg tables via DuckDB — each table is registered as a sanitized view (`db.events` → `db_events`) plus its quoted dotted alias (`"db.events"`). Docker-independent: works with every catalog/storage profile. Exposed as `lakebranch sql`, `POST /api/sql`, and a GUI panel.
 - **Airflow is external and swappable:** Lakebranch provides the wiring (`load_config()`, `get_provider()`, PyIceberg catalog helpers); DAGs are thin and plain-Python. A standalone provider package (`airflow-providers-lakebranch/`) adds a `LakebranchWriteOperator`.
 
@@ -26,7 +27,7 @@ A **local, self-contained Apache Iceberg data lake stack**. The default stack is
 - Test suite (`tests/`, run with `pytest`) — config, run-log, storage factory, CLI, API serialization, plus Docker-free SQLite-catalog integration tests
 - Nessie + SeaweedFS + MinIO + AWS S3 (BYOC) Docker Compose profiles
 - DuckDB run-logging layer (`python -m src.lakebranch.runs`)
-- FastAPI GUI dev preview with **Time Travel** (scan at a past snapshot), **Snapshot Diff** (added/removed rows between snapshots), and a **SQL query runner** (DuckDB over every Iceberg table)
+- FastAPI GUI dev preview with **Time Travel** (scan at a past snapshot), **Snapshot Diff** (added/removed rows between snapshots), a **SQL query runner** (DuckDB over every Iceberg table), and **Nessie branch management** (create/merge/delete branches in a dedicated Branches panel)
 - **DuckDB SQL query engine** (`lakebranch sql` / `POST /api/sql`): real SQL (SELECT/JOIN/GROUP BY/subqueries) over the catalog's Iceberg tables, with a Docker-free test suite
 - Airflow reference DAG + standalone provider package with demo DAG
 - Profile-aware config loader (`src/lakebranch/config.py`) with `STORAGE_PROFILE` + `CATALOG_PROFILE`
@@ -38,7 +39,7 @@ The README's [CHANGELOG](CHANGELOG.md) tracks the full roadmap. Near-term priori
 
 - [x] GUI: add write support (upload CSV/Parquet, append/overwrite) — done, via the Import Data panel + `POST /api/tables/{table}/data` / `POST /api/tables/{table}/rows` / `POST /api/namespaces`
 - [x] SQLite catalog support — done, via `CATALOG_PROFILE=sqlite` (PyIceberg SQLite catalog); pairs with `STORAGE_PROFILE=filesystem` for a Docker-free stack
-- [ ] GUI: add Nessie branch management (create/merge branches — the "undo/redo for data" story)
+- [x] GUI: add Nessie branch management (create/merge branches — the "undo/redo for data" story) — done, via `src/lakebranch/nessie.py` (Nessie REST v2 tree API client) + `GET/POST /api/branches` / `POST /api/branches/merge` / `DELETE /api/branches/{name}` + a GUI Branches panel; tested with a fake HTTP session (Docker-free)
 - [x] Add a bundled query engine (e.g. DuckDB via pyiceberg) so quickstart supports SQL out of the box — done, via `src/lakebranch/sql.py` + `lakebranch sql` CLI + `POST /api/sql` + GUI SQL panel
 - [ ] GCS and ADLS storage profiles (currently "planned" in README)
 - [ ] PostgreSQL catalog support (currently only Nessie + SQLite are wired)
@@ -100,6 +101,7 @@ src/lakebranch/
 ├── config.py               # Profile-aware config loader (load_config; STORAGE_PROFILE + CATALOG_PROFILE)
 ├── runs.py                 # DuckDB run-log (telemetry) layer
 ├── sql.py                  # DuckDB SQL-over-Iceberg engine (run_sql; lakebranch sql + POST /api/sql)
+├── nessie.py               # Nessie REST v2 tree-API client (branches/tags: list/create/merge/delete)
 ├── api/app.py              # FastAPI GUI backend (:8787)
 ├── ui/index.html           # Single-page GUI (no build step)
 └── storage/

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Nessie branch management** (the "undo/redo for data" story): a new `src/lakebranch/nessie.py` client talks to Nessie's REST **v2 tree API** (`/api/v2/trees`) — separate from PyIceberg's Iceberg REST client, which has no branch APIs — and lists branches/tags, creates branches, merges them, and deletes them. Exposed as `GET /api/branches`, `POST /api/branches`, `POST /api/branches/merge`, and `DELETE /api/branches/{name}`, plus a new GUI **Branches** panel (current-branch badge, list, create, merge, delete). The branch APIs degrade to a 400 with a clear message on the SQLite catalog profile (no branches/tags there). Tested Docker-free with a fake HTTP session and FastAPI `TestClient` (`tests/test_nessie.py`, `tests/test_api_branches.py`).
 - **DuckDB SQL query engine** (`src/lakebranch/sql.py`): real SQL (SELECT/JOIN/GROUP BY/subqueries) over the catalog's Iceberg tables via DuckDB. Each table is registered as a sanitized view (`db.events` → `db_events`) plus its quoted dotted alias (`"db.events"`). Docker-independent — works with every catalog (`nessie` / `sqlite`) and storage (`seaweedfs` / `minio` / `aws-s3` / `filesystem`) profile. Exposed as the `lakebranch sql` CLI command and `POST /api/sql` (returns `query`, `row_count`, `columns`, `rows`, `tables` mapping, `duration_ms`).
 - **GUI SQL panel**: a "SQL" panel in the single-page UI runs arbitrary SQL over every Iceberg table in the catalog via `POST /api/sql`, renders the result grid, and shows which view names map to which tables.
 - **Docker-free SQL engine tests** (`tests/test_sql.py`): cover sanitized view names, quoted dotted aliases, GROUP BY aggregates, real SQL JOINs across tables, `--limit` truncation, and error handling against the SQLite catalog + filesystem warehouse. `POST /api/sql` is also covered in `tests/test_api_integration.py` (valid aggregates, dotted alias, invalid-query 422).
@@ -34,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- GUI: Nessie branch management (create/merge branches)
 - GCS and ADLS storage profiles
 - PostgreSQL catalog support
 

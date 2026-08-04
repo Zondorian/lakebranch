@@ -162,8 +162,26 @@
 
   .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); margin-bottom: 8px; }
 
-  /* ---------- Runs ---------- */
-  .run-list { list-style: none; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+  /* ---------- Runs & branches ---------- */
+  .run-list, .branch-list { list-style: none; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+  .branch-item {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.02);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    font-family: var(--mono); font-size: 12.5px;
+  }
+  .branch-item .bname { font-weight: 600; }
+  .branch-item .bhash { color: var(--text-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+  .branch-item .bcur { color: var(--warning); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; border: 1px solid rgba(255, 184, 77, 0.4); padding: 1px 6px; border-radius: 99px; }
+  .branch-item button {
+    background: rgba(255, 107, 107, 0.12); color: var(--danger);
+    border: 1px solid rgba(255, 107, 107, 0.35); border-radius: 6px;
+    padding: 2px 8px; font-size: 11px; cursor: pointer;
+  }
+  .branch-item button:hover { filter: brightness(1.2); }
+  .branch-item button:disabled { opacity: 0.5; cursor: not-allowed; }
   .run-item {
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -269,6 +287,34 @@
 
   <!-- Center: detail -->
   <section class="center">
+    <!-- Branches (Nessie branch management — the "undo/redo for data" story) -->
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Branches</h2>
+        <span class="count" id="branch-current"></span>
+      </div>
+      <div style="padding: 12px 16px;">
+        <p class="tt-note">Nessie's Git-like versioning of the catalog. Create a branch before destructive writes, experiment, then merge it back.</p>
+        <ul class="branch-list" id="branch-list">
+          <li class="empty" style="padding: 10px 12px; color: var(--text-dim); font-size: 13px;">Loading branches…</li>
+        </ul>
+
+        <div class="query-bar" style="margin-top: 12px;">
+          <input id="b-new-name" type="text" placeholder="new branch name" style="flex:1;" />
+          <button id="b-new" onclick="createBranch()">Create</button>
+        </div>
+
+        <div class="tt-bar" style="margin-top: 10px;">
+          <select id="b-merge-from"></select>
+          <span style="color:var(--text-dim);">→</span>
+          <select id="b-merge-to"></select>
+          <button id="b-merge" onclick="mergeBranches()">Merge</button>
+        </div>
+
+        <div id="branch-result"></div>
+      </div>
+    </div>
+
     <div id="detail-view" class="placeholder">
       <div>
         <strong>Select a table</strong>
@@ -764,6 +810,131 @@ async function runDiff() {
 }
 
 /* ------------------------------------------------------------------ *
+ * Branches panel (Nessie branch management)
+ * ------------------------------------------------------------------ */
+let currentBranchName = null;
+
+async function loadBranches() {
+  const list = document.getElementById("branch-list");
+  const currentEl = document.getElementById("branch-current");
+  const mergeFrom = document.getElementById("b-merge-from");
+  const mergeTo = document.getElementById("b-merge-to");
+  if (!list || !mergeFrom || !mergeTo) return;
+  try {
+    const data = await api("/api/branches");
+    currentBranchName = data.current || null;
+    currentEl.textContent = currentBranchName ? `on ${currentBranchName}` : "";
+
+    const refs = data.available || [];
+    if (!refs.length) {
+      list.innerHTML = '<li class="empty" style="padding: 10px 12px; color: var(--text-dim); font-size: 13px;">No branches yet — Nessie seeds a default branch automatically.</li>';
+    } else {
+      list.innerHTML = "";
+      for (const ref of refs) {
+        const li = document.createElement("li");
+        li.className = "branch-item";
+        const isCurrent = ref.name === currentBranchName;
+        li.innerHTML = `
+          <div style="display:flex; align-items:center; gap:8px; min-width:0;">
+            <span class="bname">${esc(ref.name)}</span>
+            ${isCurrent ? `<span class="bcur">current</span>` : ""}
+          </div>
+          <span class="bhash" title="${esc(ref.hash)}">${esc((ref.hash || "").slice(0, 12))}</span>
+          ${isCurrent ? "" : `<button onclick="deleteBranch('${esc(ref.name)}')">delete</button>`}
+        `;
+        list.appendChild(li);
+      }
+    }
+
+    // Populate merge dropdowns with the branch list (branches only, not tags).
+    const branchNames = (data.branches || []).map((b) => b.name);
+    if (branchNames.length) {
+      const optHtml = (n) => `<option value="${esc(n)}">${esc(n)}</option>`;
+      mergeFrom.innerHTML = branchNames.map(optHtml).join("");
+      mergeTo.innerHTML = branchNames.map(optHtml).join("");
+      if (branchNames.includes(currentBranchName)) {
+        mergeFrom.value = currentBranchName;
+        mergeTo.value = currentBranchName;
+      }
+      if (branchNames.length >= 2) {
+        // Prefer: from = the non-current branch, to = current.
+        const nonCurrent = branchNames.find((n) => n !== currentBranchName);
+        if (nonCurrent) mergeFrom.value = nonCurrent;
+        mergeTo.value = currentBranchName;
+      }
+    } else {
+      mergeFrom.innerHTML = '<option value="">No branches</option>';
+      mergeTo.innerHTML = '<option value="">No branches</option>';
+    }
+  } catch (err) {
+    list.innerHTML = `<li class="error" style="padding: 10px 12px; color: var(--danger); font-size: 13px;">Branch management unavailable: ${esc(err.message)}</li>`;
+    currentEl.textContent = "";
+  }
+}
+
+async function createBranch() {
+  const input = document.getElementById("b-new-name");
+  const btn = document.getElementById("b-new");
+  const result = document.getElementById("branch-result");
+  const name = input.value.trim();
+  if (!name) { result.innerHTML = "<p class='notice'>Enter a branch name first.</p>"; return; }
+  btn.disabled = true;
+  result.innerHTML = "<p class='notice'>Creating branch…</p>";
+  try {
+    const data = await api("/api/branches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, from_ref: currentBranchName || "main" }),
+    });
+    result.innerHTML = "<p class='notice' style='color: var(--success);'>Branch <code style='font-family:var(--mono);'>" + esc(data.name) + "</code> created at <code style='font-family:var(--mono);'>" + esc((data.hash || "").slice(0, 12)) + "</code></p>";
+    input.value = "";
+    loadBranches();
+  } catch (err) {
+    result.innerHTML = "<div class='error-box'>" + esc(err.message) + "</div>";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function mergeBranches() {
+  const source = document.getElementById("b-merge-from").value;
+  const target = document.getElementById("b-merge-to").value;
+  const btn = document.getElementById("b-merge");
+  const result = document.getElementById("branch-result");
+  if (!source || !target) { result.innerHTML = "<p class='notice'>Pick a source and target branch.</p>"; return; }
+  if (source === target) { result.innerHTML = "<p class='notice'>Source and target must differ.</p>"; return; }
+  btn.disabled = true;
+  result.innerHTML = "<p class='notice'>Merging…</p>";
+  try {
+    const data = await api("/api/branches/merge", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, target }),
+    });
+    result.innerHTML = data.merged
+      ? "<p class='notice' style='color: var(--success);'>Merged <code style='font-family:var(--mono);'>" + esc(source) + "</code> → <code style='font-family:var(--mono);'>" + esc(target) + "</code></p>"
+      : "<div class='error-box'>Merge conflicts detected.</div>";
+    loadBranches();
+  } catch (err) {
+    result.innerHTML = "<div class='error-box'>" + esc(err.message) + "</div>";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function deleteBranch(name) {
+  const result = document.getElementById("branch-result");
+  if (!window.confirm("Delete branch '" + name + "'? This removes the branch's references.")) return;
+  try {
+    await api("/api/branches/" + encodeURIComponent(name), { method: "DELETE" });
+    result.innerHTML = "<p class='notice' style='color: var(--success);'>Branch <code style='font-family:var(--mono);'>" + esc(name) + "</code> deleted.</p>";
+    loadBranches();
+  } catch (err) {
+    result.innerHTML = "<div class='error-box'>" + esc(err.message) + "</div>";
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Runs panel
  * ------------------------------------------------------------------ */
 async function loadRuns() {
@@ -807,7 +978,7 @@ async function loadRuns() {
  * ------------------------------------------------------------------ */
 async function boot() {
   try {
-    await Promise.all([loadTables(), loadRuns()]);
+    await Promise.all([loadTables(), loadRuns(), loadBranches()]);
     setStatus(true, "connected");
   } catch (err) {
     setStatus(false, "API unreachable: " + err.message);

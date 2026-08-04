@@ -13,6 +13,10 @@ This API exposes:
 - ``GET  /api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…`` — diff two snapshots
 - ``POST /api/query``             — run an Iceberg scan with a filter expression
 - ``POST /api/sql``               — run an arbitrary SQL query over Iceberg via DuckDB (JOINs, GROUP BY, subqueries)
+- ``GET  /api/branches``          — list Nessie branches/tags + the current branch
+- ``POST /api/branches``          — create a Nessie branch (the "undo/redo for data" story)
+- ``POST /api/branches/merge``    — merge one Nessie branch into another
+- ``DELETE /api/branches/{name}`` — delete a Nessie branch
 - ``POST /api/namespaces``        — create a namespace
 - ``POST /api/tables/{table}/data`` — upload CSV/Parquet and append/overwrite (creates the table if missing)
 - ``POST /api/tables/{table}/rows`` — write JSON rows (append/overwrite; creates the table if missing)
@@ -48,6 +52,14 @@ from pyiceberg.table import Table
 from src.lakebranch.catalog import ensure_namespace, init_catalog, namespace_of
 from src.lakebranch.config import load_config
 from src.lakebranch.jsonutil import df_to_rows, json_safe
+from src.lakebranch.nessie import (
+    NessieClient,
+    NessieConflictError,
+    NessieError,
+    NessieNotFoundError,
+    current_branch,
+    nessie_api_base,
+)
 from src.lakebranch.runs import log_run, recent_runs
 from src.lakebranch.sql import run_sql
 
@@ -109,6 +121,41 @@ def _load_table(table_name: str) -> Table:
 # -----------------------------------------------------------------------------
 _json_safe = json_safe
 _df_to_rows = df_to_rows
+
+
+# -----------------------------------------------------------------------------
+# Nessie branch helper (lazy; only available for the `nessie` catalog profile)
+# -----------------------------------------------------------------------------
+_nessie_client = None
+
+
+def _get_nessie_client() -> NessieClient:
+    """Load (once) the Nessie tree-API client for the configured profile.
+
+    Nessie branches/tags only exist in the Nessie catalog; the SQLite catalog
+    has no Git-like versioning, so the branch APIs return 400 when
+    ``CATALOG_PROFILE=sqlite`` is active.
+    """
+    global _nessie_client
+    if _nessie_client is None:
+        config = load_config()
+        if config["catalog_profile"] != "nessie":
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Branch management requires the Nessie catalog "
+                    "(CATALOG_PROFILE=nessie). The SQLite catalog has no "
+                    "branches/tags."
+                ),
+            )
+        _nessie_client = NessieClient(nessie_api_base(config["nessie_uri"]))
+    return _nessie_client
+
+
+def _reset_nessie_client_for_tests() -> None:
+    """Reset the cached Nessie client (test helper)."""
+    global _nessie_client
+    _nessie_client = None
 
 
 # -----------------------------------------------------------------------------
@@ -341,6 +388,152 @@ def run_sql_api(request: SqlRequest) -> dict[str, Any]:
         raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"SQL query failed: {exc}") from exc
+
+
+# -----------------------------------------------------------------------------
+# Nessie branch management (the "undo/redo for data" story)
+# -----------------------------------------------------------------------------
+class CreateBranchRequest(BaseModel):
+    """Body for ``POST /api/branches`` — fork a new Nessie branch."""
+
+    name: str = Field(..., min_length=1, description="New branch name")
+    from_ref: str = Field(
+        default="main",
+        description="Branch/tag to fork from (used when from_hash is omitted)",
+    )
+    from_hash: str | None = Field(
+        default=None,
+        description="Optional source hash — fork the exact commit instead of the tip",
+    )
+
+
+class MergeBranchesRequest(BaseModel):
+    """Body for ``POST /api/branches/merge`` — merge a source branch into a target."""
+
+    source: str = Field(..., min_length=1, description="Branch to merge FROM")
+    target: str = Field(default="main", min_length=1, description="Branch to merge INTO")
+    from_hash: str | None = Field(
+        default=None,
+        description="Optional source hash to merge (defaults to the tip)",
+    )
+    keep_individual_commits: bool = Field(
+        default=False,
+        description="Keep the source's commits (False squashes them)",
+    )
+
+
+@app.get("/api/branches")
+def list_branches() -> dict[str, Any]:
+    """List every Nessie branch/tag plus the currently selected branch.
+
+    Returns ``available`` (branches then tags, each with name/hash), and
+    ``current`` (the branch name encoded in ``NESSIE_URI``).
+    """
+    config = load_config()
+    current = current_branch(config["nessie_uri"])
+    try:
+        refs = _get_nessie_client().list_references()
+    except HTTPException:
+        raise
+    except NessieError as exc:
+        raise HTTPException(status_code=502, detail=f"Unable to list branches: {exc}") from exc
+
+    branches: list[dict[str, str]] = []
+    tags: list[dict[str, str]] = []
+    for ref in refs:
+        entry = {"name": ref.get("name", ""), "hash": ref.get("hash", "")}
+        if ref.get("type") == "TAG" or ref.get("refType") == "TAG":
+            tags.append(entry)
+        else:
+            branches.append(entry)
+
+    def sort_key(item: dict[str, str]) -> str:
+        return item["name"]
+
+    return {
+        "available": sorted(branches, key=sort_key) + sorted(tags, key=sort_key),
+        "branches": sorted(branches, key=sort_key),
+        "tags": sorted(tags, key=sort_key),
+        "current": current,
+    }
+
+
+@app.post("/api/branches", status_code=201)
+def create_branch(request: CreateBranchRequest) -> dict[str, Any]:
+    """Create a new Nessie branch from an existing branch/tag.
+
+    This is the "undo/redo for data" enabler: fork a branch before running
+    destructive writes, experiment, then merge it back (or delete it).
+    """
+    try:
+        created = _get_nessie_client().create_branch(
+            request.name,
+            from_ref=request.from_ref,
+            from_hash=request.from_hash,
+        )
+    except HTTPException:
+        raise
+    except NessieConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Branch creation failed: {exc}",
+        ) from exc
+    except NessieError as exc:
+        raise HTTPException(status_code=502, detail=f"Branch creation failed: {exc}") from exc
+    return {
+        "name": created.get("name", request.name),
+        "hash": created.get("hash", ""),
+        "from_ref": request.from_ref,
+        "from_hash": request.from_hash,
+    }
+
+
+@app.post("/api/branches/merge")
+def merge_branches(request: MergeBranchesRequest) -> dict[str, Any]:
+    """Merge a source Nessie branch into a target branch."""
+    try:
+        result = _get_nessie_client().merge(
+            request.source,
+            request.target,
+            from_hash=request.from_hash,
+            keep_individual_commits=request.keep_individual_commits,
+        )
+    except HTTPException:
+        raise
+    except NessieConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Merge failed — conflicts. Error: {exc}",
+        ) from exc
+    except NessieError as exc:
+        raise HTTPException(status_code=502, detail=f"Merge failed: {exc}") from exc
+
+    conflicts = result.get("conflicts") if isinstance(result, dict) else None
+    return {
+        "source": request.source,
+        "target": request.target,
+        "merged": not conflicts,
+        # Nessie returns the final target branch state; extract it if present.
+        "target_branch": result if isinstance(result, dict) else {},
+        "conflicts": conflicts or [],
+    }
+
+
+@app.delete("/api/branches/{branch_name:path}")
+def delete_branch(branch_name: str) -> dict[str, Any]:
+    """Delete a Nessie branch by name."""
+    try:
+        _get_nessie_client().delete_branch(branch_name)
+    except HTTPException:
+        raise
+    except NessieNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Branch '{branch_name}' not found.",
+        ) from exc
+    except NessieError as exc:
+        raise HTTPException(status_code=502, detail=f"Delete failed: {exc}") from exc
+    return {"name": branch_name, "deleted": True}
 
 
 # -----------------------------------------------------------------------------
