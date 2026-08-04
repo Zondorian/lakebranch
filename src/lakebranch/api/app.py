@@ -40,7 +40,11 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pyiceberg.exceptions import NoSuchTableError
-from pyiceberg.io.pyarrow import pyarrow_to_schema, schema_to_pyarrow
+from pyiceberg.io.pyarrow import (
+    PYARROW_PARQUET_FIELD_ID_KEY,
+    pyarrow_to_schema,
+    schema_to_pyarrow,
+)
 from pyiceberg.table import Table
 
 from src.lakebranch.catalog import ensure_namespace, init_catalog, namespace_of
@@ -201,6 +205,59 @@ def table_rows(
     }
 
 
+@app.get("/api/tables/{table:path}/diff")
+def table_diff(
+    table: str,
+    from_snapshot_id: int = Query(..., description="Baseline snapshot ID"),
+    to_snapshot_id: int = Query(..., description="Target snapshot ID"),
+    limit: int = Query(default=100, ge=1, le=1000, description="Max rows per side"),
+) -> dict[str, Any]:
+    """Compare two snapshots of a table (time-travel diff).
+
+    Scans the table at each snapshot and reports rows that were added or
+    removed between them (matched by row equality), plus per-side row counts.
+    Iceberg's snapshot history makes this possible — no other local OSS tool
+    exposes it in a UI.
+
+    NOTE: registered BEFORE the ``{table:path}`` detail route so that the
+    ``/diff`` suffix is not swallowed by the greedy path converter.
+    """
+    iceberg_table = _load_table(table)
+    try:
+        arrow_from = iceberg_table.scan(snapshot_id=from_snapshot_id, limit=limit).to_arrow()
+        arrow_to = iceberg_table.scan(snapshot_id=to_snapshot_id, limit=limit).to_arrow()
+        df_from = arrow_from.to_pandas()
+        df_to = arrow_to.to_pandas()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Diff failed: {exc}") from exc
+
+    # Diff by row-set equality (order-insensitive) on the common columns.
+    common_cols = [col for col in df_to.columns if col in df_from.columns]
+    set_from = {tuple(r[col] for col in common_cols) for _, r in df_from.iterrows()} if len(df_from) else set()
+    set_to = {tuple(r[col] for col in common_cols) for _, r in df_to.iterrows()} if len(df_to) else set()
+
+    removed_rows = [
+        {k: _json_safe(v) for k, v in row.items()}
+        for row in (dict(zip(common_cols, values)) for values in sorted(set_from - set_to))
+    ]
+    added_rows = [
+        {k: _json_safe(v) for k, v in row.items()}
+        for row in (dict(zip(common_cols, values)) for values in sorted(set_to - set_from))
+    ]
+
+    return {
+        "table": table,
+        "from_snapshot_id": from_snapshot_id,
+        "to_snapshot_id": to_snapshot_id,
+        "from_row_count": len(df_from),
+        "to_row_count": len(df_to),
+        "added_rows": added_rows,
+        "removed_rows": removed_rows,
+    }
+
+
 @app.get("/api/tables/{table:path}")
 def table_detail(table: str) -> dict[str, Any]:
     """Return a table's schema and high-level metadata."""
@@ -242,56 +299,6 @@ def table_detail(table: str) -> dict[str, Any]:
         "current_snapshot_id": metadata.current_snapshot_id,
         "snapshot_count": len(snapshots),
         "snapshots": snapshots[-5:],  # last 5 snapshots for a compact overview
-    }
-
-
-@app.get("/api/tables/{table:path}/diff")
-def table_diff(
-    table: str,
-    from_snapshot_id: int = Query(..., description="Baseline snapshot ID"),
-    to_snapshot_id: int = Query(..., description="Target snapshot ID"),
-    limit: int = Query(default=100, ge=1, le=1000, description="Max rows per side"),
-) -> dict[str, Any]:
-    """Compare two snapshots of a table (time-travel diff).
-
-    Scans the table at each snapshot and reports rows that were added or
-    removed between them (matched by row equality), plus per-side row counts.
-    Iceberg's snapshot history makes this possible — no other local OSS tool
-    exposes it in a UI.
-    """
-    iceberg_table = _load_table(table)
-    try:
-        arrow_from = iceberg_table.scan(snapshot_id=from_snapshot_id, limit=limit).to_arrow()
-        arrow_to = iceberg_table.scan(snapshot_id=to_snapshot_id, limit=limit).to_arrow()
-        df_from = arrow_from.to_pandas()
-        df_to = arrow_to.to_pandas()
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Diff failed: {exc}") from exc
-
-    # Diff by row-set equality (order-insensitive) on the common columns.
-    common_cols = [col for col in df_to.columns if col in df_from.columns]
-    set_from = {tuple(r[col] for col in common_cols) for _, r in df_from.iterrows()} if len(df_from) else set()
-    set_to = {tuple(r[col] for col in common_cols) for _, r in df_to.iterrows()} if len(df_to) else set()
-
-    removed_rows = [
-        dict(zip(common_cols, row))
-        for row in sorted(set_from - set_to)
-    ]
-    added_rows = [
-        dict(zip(common_cols, row))
-        for row in sorted(set_to - set_from)
-    ]
-
-    return {
-        "table": table,
-        "from_snapshot_id": from_snapshot_id,
-        "to_snapshot_id": to_snapshot_id,
-        "from_row_count": len(df_from),
-        "to_row_count": len(df_to),
-        "added_rows": added_rows,
-        "removed_rows": removed_rows,
     }
 
 
@@ -361,7 +368,17 @@ def _get_or_create_writable_table(table_name: str, arrow_schema: pa.Schema) -> t
     try:
         return catalog.load_table(table_name), False
     except NoSuchTableError:
-        iceberg_schema = pyarrow_to_schema(arrow_schema)
+        # An inferred Arrow schema has no Iceberg field IDs, and PyIceberg's
+        # pyarrow_to_schema() raises without them (or a name mapping). Stamp
+        # sequential field IDs (1..N) so the table gets a valid initial schema.
+        arrow_fields = []
+        for field_id, field in enumerate(arrow_schema, start=1):
+            metadata = dict(field.metadata or {})
+            metadata[PYARROW_PARQUET_FIELD_ID_KEY] = str(field_id).encode()
+            arrow_fields.append(field.with_metadata(metadata))
+        arrow_schema_with_ids = pa.schema(arrow_fields, metadata=arrow_schema.metadata)
+
+        iceberg_schema = pyarrow_to_schema(arrow_schema_with_ids)
         ensure_namespace(catalog, namespace_of(table_name))
         return catalog.create_table(table_name, schema=iceberg_schema), True
 
@@ -375,6 +392,25 @@ def _parse_upload(file: UploadFile) -> pa.Table:
     # Default to CSV; pandas gives the most tolerant CSV parsing.
     df = pd.read_csv(io.BytesIO(raw))
     return pa.Table.from_pandas(df)
+
+
+def _arrow_with_field_ids(arrow_table: pa.Table, iceberg_table: Table) -> pa.Table:
+    """Stamp Iceberg field IDs onto the arrow table so PyIceberg can write it.
+
+    Tables auto-created by the GUI from an inferred Arrow schema have no
+    Iceberg field IDs (the schema maps columns by name). Without the
+    ``PARQUET:field_id`` metadata on every field, PyIceberg's Parquet writer
+    fails with "Parquet file does not have field-ids...".
+    """
+    iceberg_schema = iceberg_table.schema()
+    arrow_schema = schema_to_pyarrow(iceberg_schema)
+    arrow_fields = []
+    for arrow_field in arrow_schema:
+        iceberg_field = iceberg_schema.find_field(arrow_field.name)
+        metadata = dict(arrow_field.metadata or {})
+        metadata[PYARROW_PARQUET_FIELD_ID_KEY] = str(iceberg_field.field_id).encode()
+        arrow_fields.append(arrow_field.with_metadata(metadata))
+    return arrow_table.cast(pa.schema(arrow_fields))
 
 
 def _apply_write(table_name: str, arrow_table: pa.Table, mode: str, pipeline: str) -> dict[str, Any]:
@@ -391,9 +427,10 @@ def _apply_write(table_name: str, arrow_table: pa.Table, mode: str, pipeline: st
         warehouse=config["warehouse"],
     ) as run:
         table, created = _get_or_create_writable_table(table_name, arrow_table.schema)
-        # Match the Iceberg table's exact schema (names/types/nullability) so
-        # PyIceberg accepts the append/overwrite.
-        arrow_table = arrow_table.cast(schema_to_pyarrow(table.schema()))
+        # Match the Iceberg table's exact schema (names/types/nullability) and
+        # stamp each field with its Iceberg field ID so PyIceberg accepts the
+        # append/overwrite.
+        arrow_table = _arrow_with_field_ids(arrow_table, table)
         if mode == "append":
             table.append(arrow_table)
         else:

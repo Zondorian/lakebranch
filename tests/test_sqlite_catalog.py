@@ -7,8 +7,6 @@ Iceberg write/read path is covered in CI without Docker or Nessie.
 
 from __future__ import annotations
 
-import os
-
 import pyarrow as pa
 import pytest
 
@@ -17,26 +15,6 @@ from src.lakebranch.config import load_config
 from src.lakebranch.write_iceberg import EVENTS_SCHEMA
 
 pytest.importorskip("pyiceberg.catalog.sql")  # requires sql-sqlite extra
-
-
-@pytest.fixture
-def lake_dir(tmp_path):
-    """A scratch directory for the SQLite catalog DB + warehouse."""
-    return tmp_path / "lake"
-
-
-@pytest.fixture
-def sqlite_env(lake_dir, monkeypatch):
-    """Point the SQLite catalog + filesystem warehouse at a temp directory."""
-    monkeypatch.setenv("STORAGE_PROFILE", "filesystem")
-    monkeypatch.setenv("CATALOG_PROFILE", "sqlite")
-    monkeypatch.setenv("FS_PATH", str(lake_dir / "warehouse"))
-    monkeypatch.setenv("WAREHOUSE", str(lake_dir / "warehouse"))
-    catalog_uri = "sqlite:///" + str(lake_dir / "catalog.db").replace(os.sep, "/")
-    monkeypatch.setenv("CATALOG_URI", catalog_uri)
-    # load_config() calls load_dotenv() which reads the repo .env; neutralize.
-    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
-    return lake_dir
 
 
 def test_sqlite_profile_loads_config(sqlite_env):
@@ -114,3 +92,82 @@ def test_sqlite_catalog_uses_filesystem_warehouse(sqlite_env, tmp_path):
     metadata_dir = warehouse / "db" / "events" / "metadata"
     assert metadata_dir.is_dir()
     assert any(metadata_dir.glob("*.metadata.json"))
+
+
+# -----------------------------------------------------------------------------
+# Time travel & snapshot diffs (Docker-free — real Iceberg snapshot history)
+# -----------------------------------------------------------------------------
+def _append_rows(table, rows):
+    """Append a small arrow table of events rows to an Iceberg table."""
+    event_ids = [r[0] for r in rows]
+    event_types = [r[1] for r in rows]
+    timestamps = [r[2] for r in rows]
+    table.append(
+        pa.table(
+            {
+                "event_id": pa.array(event_ids, type=pa.int64()),
+                "event_type": pa.array(event_types, type=pa.string()),
+                "timestamp": pa.array(timestamps, type=pa.string()),
+            },
+            schema=pa.schema(
+                [
+                    pa.field("event_id", pa.int64(), nullable=False),
+                    pa.field("event_type", pa.string()),
+                    pa.field("timestamp", pa.string()),
+                ]
+            ),
+        )
+    )
+
+
+def _snapshot_ids(table):
+    """Return the table's snapshot IDs in chronological order."""
+    snaps = table.metadata.snapshots
+    assert snaps is not None
+    ordered = sorted(snaps, key=lambda s: s.timestamp_ms)
+    return [s.snapshot_id for s in ordered]
+
+
+def _scan_rows(table, snapshot_id=None):
+    """Scan the table (optionally at a snapshot) and return set of (event_id, event_type)."""
+    if snapshot_id is not None:
+        arrow = table.scan(snapshot_id=snapshot_id).to_arrow()
+    else:
+        arrow = table.scan().to_arrow()
+    return set(zip(arrow.column("event_id").to_pylist(), arrow.column("event_type").to_pylist()))
+
+
+def test_sqlite_catalog_time_travel(sqlite_env):
+    """Scanning at a past snapshot returns the table as it was then."""
+    cfg = load_config()
+    catalog = init_catalog(cfg)
+    ensure_namespace(catalog, "db")
+    table = ensure_table(catalog, "db.events", EVENTS_SCHEMA)
+
+    _append_rows(table, [(1, "login", "2026-07-31T10:00:00Z")])
+    first_snapshot = table.metadata.current_snapshot_id
+    _append_rows(table, [(2, "purchase", "2026-07-31T10:05:00Z")])
+    _append_rows(table, [(3, "logout", "2026-07-31T10:10:00Z")])
+
+    assert _scan_rows(table) == {(1, "login"), (2, "purchase"), (3, "logout")}
+    assert _scan_rows(table, snapshot_id=first_snapshot) == {(1, "login")}
+
+
+def test_sqlite_catalog_snapshot_diff(sqlite_env):
+    """The current table minus an older snapshot equals the later-appended rows."""
+    cfg = load_config()
+    catalog = init_catalog(cfg)
+    ensure_namespace(catalog, "db")
+    table = ensure_table(catalog, "db.events", EVENTS_SCHEMA)
+
+    _append_rows(table, [(1, "login", "2026-07-31T10:00:00Z"), (2, "purchase", "2026-07-31T10:05:00Z")])
+    first_snapshot = table.metadata.current_snapshot_id
+    _append_rows(table, [(3, "logout", "2026-07-31T10:10:00Z")])
+
+    ids = _snapshot_ids(table)
+    assert ids[0] == first_snapshot
+
+    set_from = _scan_rows(table, snapshot_id=ids[0])
+    set_to = _scan_rows(table, snapshot_id=ids[-1])
+    assert set_to - set_from == {(3, "logout")}
+    assert set_from - set_to == set()

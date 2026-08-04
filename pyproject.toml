@@ -53,6 +53,8 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+    # FastAPI TestClient (used by the GUI API integration tests) requires httpx.
+    "httpx",
 ]
 
 [project.scripts]

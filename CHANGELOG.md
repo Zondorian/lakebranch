@@ -17,9 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQLite catalog profile** (`CATALOG_PROFILE=sqlite`): PyIceberg `SqlCatalog` backed by a single local `.db` file. Pairs with `STORAGE_PROFILE=filesystem` for a **fully Docker-free stack** — the entire end-to-end write/query pipeline runs with just `pip install`, no containers, no network.
 - **`init_catalog()` catalog routing** (`src/lakebranch/catalog.py`): routes to the Nessie REST catalog (`nessie`, default) or the SQLite catalog (`sqlite`) based on `CATALOG_PROFILE`. Handles Windows/macOS/Linux local warehouse paths safely (relative-path rendering with a `file://` cross-drive fallback).
 - **Docker-free quickstart** in the README: `STORAGE_PROFILE=filesystem CATALOG_PROFILE=sqlite` → `lakebranch pipeline` works with no Docker at all. The GUI, `init-demo`, run-logging, and Airflow provider all work with this profile.
-- **Docker-free integration tests** (`tests/test_sqlite_catalog.py`): exercise the real Iceberg write/read path in CI — create namespace → create table → append → scan → idempotent reload — with no Docker or Nessie.
+- **Docker-free integration tests** (`tests/test_sqlite_catalog.py`): exercise the real Iceberg write/read path in CI — create namespace → create table → append → scan — with no Docker or Nessie.
 - `pyiceberg[sql-sqlite]` extra added to `pyproject.toml` and `requirements.txt` (SQLAlchemy for the SQLite catalog).
 - `CATALOG_PROFILE` / `CATALOG_URI` documented in `.env.example` and the README configuration tables.
+- **GUI API integration tests** (`tests/test_api_integration.py`): exercise the real FastAPI app against the Docker-free SQLite catalog + filesystem warehouse via `TestClient` — table listing, write rows (auto-create), **time travel** (`GET /api/tables/{table}/rows?snapshot_id=…`), **snapshot diff** (`GET /api/tables/{table}/diff`), and the filter query runner (`POST /api/query`). All run in CI with no Docker or Nessie. `httpx` added to the `dev` extra (required by FastAPI `TestClient`).
+
+### Fixed
+
+- **`GET /api/tables/{table}/diff` route was unreachable**: the greedy `{table:path}` detail route was registered before it, so `db.events/diff` was swallowed as a (non-existent) table name → 404. The diff route is now registered before the detail route (same pattern as `/rows`).
+- **Snapshot diff rows were not JSON-safe**: `added_rows` / `removed_rows` contained numpy scalars from `pandas.iterrows()` and could fail JSON encoding; they are now passed through `_json_safe`.
+- **GUI write path failed on auto-created tables** with *"Parquet file does not have field-ids and the Iceberg table does not have 'schema.name-mapping.default' defined"*: tables created from an inferred Arrow schema (no `PARQUET:field_id` metadata) were accepted by `pyarrow_to_schema()` before. `_get_or_create_writable_table` now stamps sequential Iceberg field IDs (1..N) on the inferred schema before conversion, and `_apply_write` re-stamps fields with the table's actual field IDs before append/overwrite. This makes `POST /api/tables/{table}/rows` and `POST /api/tables/{table}/data` (append/overwrite → auto-create) work end-to-end against the Docker-free SQLite catalog.
+- **Shared Docker-free test fixtures** (`sqlite_env`, `lake_dir`) moved from `tests/test_sqlite_catalog.py` to `tests/conftest.py` so the catalog and API integration suites share one environment setup.
 
 ### Planned
 
