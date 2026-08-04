@@ -1,0 +1,3 @@
+# Only Zondorian is a code owner, so only Zondorian's approval
+# can satisfy the "Require review from Code Owners" rule on main.
+* @Zondorian
