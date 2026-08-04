@@ -188,7 +188,7 @@ The `write_iceberg` pipeline uses the logger internally via a context manager; t
 
 ## Lakebranch GUI (Developer Preview)
 
-Lakebranch ships a **web-based developer preview** — a FastAPI backend + a single-page static UI that makes the lakehouse explorable in the browser: tables, row previews, time travel, snapshot diffs, and run history. It is intentionally minimal and clearly marked as a dev preview: no auth, no user management, no production hardening.
+Lakebranch ships a **web-based developer preview** — a FastAPI backend + a single-page static UI that makes the lakehouse explorable *and writable* in the browser: tables, row previews, time travel, snapshot diffs, a query runner, CSV/Parquet/JSON import, and run history. It is intentionally minimal and clearly marked as a dev preview: no auth, no user management, no production hardening.
 
 > **Open-source note:** the GUI is part of the Apache 2.0 core — FastAPI + a single-page static UI, both open and free.
 
@@ -199,6 +199,7 @@ Lakebranch ships a **web-based developer preview** — a FastAPI backend + a sin
 - **Time Travel** — Lakebranch's signature feature: pick a past Iceberg snapshot and view the table as it was then (`GET /api/tables/{table}/rows?snapshot_id=…`). No other local OSS tool exposes Iceberg snapshot history in a UI.
 - **Snapshot Diff** — compare two snapshots and see exactly which rows were added/removed between them (`GET /api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…`)
 - **Query runner** — run an Iceberg scan with a SQL-like row filter (`POST /api/query`, e.g. `event_id > 1` or `event_type = 'login'`)
+- **Import Data** — upload a CSV/Parquet file or paste JSON rows and write them to a table (`append` / `overwrite`), creating the table automatically (schema inferred) if it does not exist. Writes are recorded in the run log (`POST /api/tables/{table}/data`, `POST /api/tables/{table}/rows`, `POST /api/namespaces`)
 - **Recent runs** — the pipeline run-log entries from [Pipeline Run Logging](#pipeline-run-logging) (`GET /api/runs`)
 
 ### Install
@@ -237,6 +238,9 @@ curl http://localhost:8787/api/runs     # run-log entries (requires the run-logg
 | `GET` | `/api/tables/{table}/rows?snapshot_id=…` | **Time travel** — scan the table as it was at a past Iceberg snapshot |
 | `GET` | `/api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…` | **Snapshot diff** — rows added/removed between two snapshots |
 | `POST` | `/api/query` | Run an Iceberg scan with a filter expression (body: `{"table": "db.events", "filter": "event_id > 1", "limit": 100}`) |
+| `POST` | `/api/namespaces` | Create a namespace (idempotent) |
+| `POST` | `/api/tables/{table}/rows` | Write JSON rows (append/overwrite) — creates the table (schema inferred) if missing |
+| `POST` | `/api/tables/{table}/data` | Upload a CSV/Parquet file and append/overwrite — creates the table if missing (multipart: `file`, `mode`) |
 | `GET` | `/api/runs` | Recent run-log entries (delegates to `src.lakebranch.runs.recent_runs()`) |
 
 ## Orchestration (Airflow)
@@ -514,6 +518,7 @@ Lakebranch/
         │   └── index.html        # Single-page UI (no build step)
         ├── cli.py                # `lakebranch` CLI (up/down/pipeline/runs/ui/init-demo)
         ├── config.py             # Profile-aware config loader
+        ├── catalog.py            # Shared catalog helpers (init_catalog / ensure_namespace / ensure_table)
         ├── init_demo.py          # Multi-table demo dataset loader
         ├── runs.py               # Pipeline run-log (telemetry) layer
         ├── write_iceberg.py      # End-to-end writer/query script

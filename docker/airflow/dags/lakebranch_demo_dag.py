@@ -31,15 +31,10 @@ import pyarrow as pa
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
-from pyiceberg.catalog import load_catalog
-from pyiceberg.exceptions import (
-    NamespaceAlreadyExistsError,
-    NoSuchNamespaceError,
-    NoSuchTableError,
-)
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
 
+from src.lakebranch.catalog import ensure_namespace, ensure_table, init_catalog
 from src.lakebranch.config import load_config
 from src.lakebranch.storage import get_provider
 
@@ -59,40 +54,21 @@ EVENTS_SCHEMA = Schema(
 
 
 # -----------------------------------------------------------------------------
-# Shared helpers
+# Shared helpers (delegate to the Lakebranch core catalog module)
 # -----------------------------------------------------------------------------
 def _get_catalog(config: dict[str, str]):
     """Build a Nessie REST catalog using the configured storage provider."""
-    provider = get_provider(config)
-    return load_catalog(
-        "nessie",
-        **{
-            "type": "rest",
-            "uri": config["nessie_uri"],
-            "warehouse": config["warehouse"],
-            **provider.catalog_properties(),
-        },
-    )
+    return init_catalog(config)
 
 
 def _ensure_namespace(catalog, namespace: str = "db") -> None:
     """Load the namespace, creating it if it does not exist."""
-    try:
-        catalog.load_namespace_properties(namespace)
-    except NoSuchNamespaceError:
-        try:
-            catalog.create_namespace(namespace)
-        except NamespaceAlreadyExistsError:
-            # Race-safe: another process created it between check and create.
-            pass
+    ensure_namespace(catalog, namespace)
 
 
 def _ensure_events_table(catalog):
     """Load or create the ``db.events`` table with the events schema."""
-    try:
-        return catalog.load_table("db.events")
-    except NoSuchTableError:
-        return catalog.create_table("db.events", schema=EVENTS_SCHEMA)
+    return ensure_table(catalog, "db.events", EVENTS_SCHEMA)
 
 
 # -----------------------------------------------------------------------------

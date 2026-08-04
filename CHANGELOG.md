@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Shared catalog helper module** (`src/lakebranch/catalog.py`): single source of truth for PyIceberg catalog bootstrap (`init_catalog`, `ensure_namespace`, `ensure_table`). Replaces the catalog logic previously duplicated across the CLI pipeline, demo loader, GUI API, and Airflow DAG/hook. New consumers get race-safe namespace/table creation and consistent error handling by default.
+
+### Added
+
+- **GUI write support**: the table detail view now has an **Import Data** panel. Upload a CSV/Parquet file or paste JSON rows, choose `append` / `overwrite`, and the data is written to the table — creating it automatically (schema inferred) if it does not exist. Writes are recorded in the run log (`gui_upload` / `gui_write_rows` pipelines). New API endpoints: `POST /api/namespaces`, `POST /api/tables/{table}/data`, `POST /api/tables/{table}/rows`.
+- `python-multipart` added to `requirements-gui.txt` and the `gui` extra (required for file uploads).
+- Unit tests for `src.lakebranch.catalog` (8 tests: namespace/table creation, idempotency, race-safety).
+
 ### Planned
 
-- GUI: write support (upload CSV/Parquet, append/overwrite) — currently read-only
 - GUI: Nessie branch management (create/merge branches)
 - Bundled query engine (e.g. DuckDB via pyiceberg) so quickstart supports SQL out of the box
 - GCS and ADLS storage profiles

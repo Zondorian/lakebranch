@@ -12,6 +12,9 @@ This API exposes:
 - ``GET  /api/tables/{table}/rows?snapshot_id=…`` — time-travel scan at a past snapshot
 - ``GET  /api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…`` — diff two snapshots
 - ``POST /api/query``             — run an Iceberg scan with a filter expression
+- ``POST /api/namespaces``        — create a namespace
+- ``POST /api/tables/{table}/data`` — upload CSV/Parquet and append/overwrite (creates the table if missing)
+- ``POST /api/tables/{table}/rows`` — write JSON rows (append/overwrite; creates the table if missing)
 - ``GET  /api/runs``              — pipeline run-log entries (from ``src.lakebranch.runs``)
 
 The static UI lives at ``src/lakebranch/ui/index.html`` and is served at ``/ui/``.
@@ -22,25 +25,27 @@ Run:
 
 from __future__ import annotations
 
+import io
 import math
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Query
+import pyarrow as pa
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from pyiceberg.catalog import load_catalog
 from pyiceberg.exceptions import NoSuchTableError
+from pyiceberg.io.pyarrow import pyarrow_to_schema, schema_to_pyarrow
 from pyiceberg.table import Table
 
+from src.lakebranch.catalog import ensure_namespace, init_catalog, namespace_of
 from src.lakebranch.config import load_config
-from src.lakebranch.runs import recent_runs
-from src.lakebranch.storage import get_provider
+from src.lakebranch.runs import log_run, recent_runs
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 
@@ -73,16 +78,7 @@ def _get_catalog():
     if _catalog is None:
         try:
             config = load_config()
-            provider = get_provider(config)
-            _catalog = load_catalog(
-                "nessie",
-                **{
-                    "type": "rest",
-                    "uri": config["nessie_uri"],
-                    "warehouse": config["warehouse"],
-                    **provider.catalog_properties(),
-                },
-            )
+            _catalog = init_catalog(config)
         except Exception as exc:
             raise HTTPException(
                 status_code=502,
@@ -339,6 +335,137 @@ def run_query(request: QueryRequest) -> dict[str, Any]:
         "columns": [{"name": col, "type": str(dtype)} for col, dtype in df.dtypes.items()],
         "rows": _df_to_rows(df),
     }
+
+
+# -----------------------------------------------------------------------------
+# Write support (upload CSV/Parquet, append/overwrite, JSON rows)
+# -----------------------------------------------------------------------------
+VALID_WRITE_MODES = ("append", "overwrite")
+
+
+class WriteRowsRequest(BaseModel):
+    """Body for ``POST /api/tables/{table}/rows`` — write JSON rows."""
+
+    mode: str = Field(default="append", description="'append' or 'overwrite'")
+    rows: list[dict[str, Any]] = Field(..., description="List of row dicts to write")
+
+
+def _get_or_create_writable_table(table_name: str, arrow_schema: pa.Schema) -> tuple[Table, bool]:
+    """Load an existing table, or create it from the given Arrow schema.
+
+    Returns:
+        A ``(table, created)`` tuple where ``created`` is True when the table
+        was newly created from the inferred Arrow schema.
+    """
+    catalog = _get_catalog()
+    try:
+        return catalog.load_table(table_name), False
+    except NoSuchTableError:
+        iceberg_schema = pyarrow_to_schema(arrow_schema)
+        ensure_namespace(catalog, namespace_of(table_name))
+        return catalog.create_table(table_name, schema=iceberg_schema), True
+
+
+def _parse_upload(file: UploadFile) -> pa.Table:
+    """Parse an uploaded CSV or Parquet file into a PyArrow table."""
+    raw = file.file.read()
+    name = (file.filename or "").lower()
+    if name.endswith((".parquet", ".pq")):
+        return pa.parquet.read_table(io.BytesIO(raw))
+    # Default to CSV; pandas gives the most tolerant CSV parsing.
+    df = pd.read_csv(io.BytesIO(raw))
+    return pa.Table.from_pandas(df)
+
+
+def _apply_write(table_name: str, arrow_table: pa.Table, mode: str, pipeline: str) -> dict[str, Any]:
+    """Append/overwrite ``arrow_table`` to ``table_name``, recording a run row."""
+    if mode not in VALID_WRITE_MODES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid mode '{mode}'. Valid modes: {', '.join(VALID_WRITE_MODES)}",
+        )
+    config = load_config()
+    with log_run(
+        pipeline=pipeline,
+        profile=config["storage_profile"],
+        warehouse=config["warehouse"],
+    ) as run:
+        table, created = _get_or_create_writable_table(table_name, arrow_table.schema)
+        # Match the Iceberg table's exact schema (names/types/nullability) so
+        # PyIceberg accepts the append/overwrite.
+        arrow_table = arrow_table.cast(schema_to_pyarrow(table.schema()))
+        if mode == "append":
+            table.append(arrow_table)
+        else:
+            table.overwrite(arrow_table)
+        run.rows_written = arrow_table.num_rows
+    return {
+        "table": table_name,
+        "mode": mode,
+        "rows_written": arrow_table.num_rows,
+        "created": created,
+        "snapshot_id": table.metadata.current_snapshot_id,
+    }
+
+
+@app.post("/api/namespaces")
+def create_namespace_api(namespace: str = Query(..., description="Namespace to create, e.g. 'db'")) -> dict[str, Any]:
+    """Create a namespace (idempotent)."""
+    try:
+        ensure_namespace(_get_catalog(), namespace)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Catalog error: {exc}") from exc
+    return {"namespace": namespace, "created": True}
+
+
+@app.post("/api/tables/{table:path}/rows")
+def write_rows(table: str, request: WriteRowsRequest) -> dict[str, Any]:
+    """Write JSON rows to a table (append/overwrite), creating it if missing."""
+    if not request.rows:
+        raise HTTPException(status_code=422, detail="'rows' must not be empty.")
+    try:
+        arrow_table = pa.Table.from_pylist(request.rows)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not infer a schema from the rows. Error: {exc}",
+        ) from exc
+    try:
+        return _apply_write(table, arrow_table, request.mode, pipeline="gui_write_rows")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Write failed: {exc}") from exc
+
+
+@app.post("/api/tables/{table:path}/data")
+async def upload_data(
+    table: str,
+    file: Annotated[UploadFile, File(..., description="CSV or Parquet file")],
+    mode: Annotated[str, Form(description="'append' or 'overwrite'")] = "append",
+) -> dict[str, Any]:
+    """Upload a CSV/Parquet file and append/overwrite it to a table.
+
+    The table is created automatically (with a schema inferred from the file)
+    if it does not already exist. The write is recorded in the run log.
+    """
+    try:
+        arrow_table = _parse_upload(file)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not parse uploaded file as CSV/Parquet. Error: {exc}",
+        ) from exc
+    if arrow_table.num_rows == 0:
+        raise HTTPException(status_code=422, detail="Uploaded file contains no rows.")
+    try:
+        return _apply_write(table, arrow_table, mode, pipeline="gui_upload")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Write failed: {exc}") from exc
 
 
 @app.get("/api/runs")

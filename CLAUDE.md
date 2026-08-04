@@ -32,7 +32,7 @@ A **local, self-contained Apache Iceberg data lake stack** built on **Nessie** (
 
 The README's [CHANGELOG](CHANGELOG.md) tracks the full roadmap. Near-term priorities:
 
-- [ ] GUI: add write support (upload CSV/Parquet, append/overwrite) — today it is read-only
+- [x] GUI: add write support (upload CSV/Parquet, append/overwrite) — done, via the Import Data panel + `POST /api/tables/{table}/data` / `POST /api/tables/{table}/rows` / `POST /api/namespaces`
 - [ ] GUI: add Nessie branch management (create/merge branches — the "undo/redo for data" story)
 - [ ] Add a bundled query engine (e.g. DuckDB via pyiceberg) so quickstart supports SQL out of the box
 - [ ] GCS and ADLS storage profiles (currently "planned" in README)
@@ -83,6 +83,7 @@ src/lakebranch/
 ├── write_iceberg.py        # End-to-end CLI pipeline (the reference pattern)
 ├── init_demo.py            # Multi-table demo dataset loader
 ├── cli.py                  # `lakebranch` CLI (up/down/pipeline/runs/ui/init-demo)
+├── catalog.py              # Shared catalog helpers (init_catalog / ensure_namespace / ensure_table)
 ├── config.py               # Profile-aware config loader (load_config)
 ├── runs.py                 # DuckDB run-log (telemetry) layer
 ├── api/app.py              # FastAPI GUI backend (:8787)

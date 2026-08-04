@@ -47,6 +47,7 @@ dependencies = [
 gui = [
     "fastapi",
     "uvicorn",
+    "python-multipart",
 ]
 dev = [
     "pytest",

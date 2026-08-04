@@ -27,57 +27,15 @@ import sys
 
 import pyarrow as pa
 from dotenv import load_dotenv
-from pyiceberg.catalog import load_catalog
-from pyiceberg.exceptions import (
-    NamespaceAlreadyExistsError,
-    NoSuchNamespaceError,
-    NoSuchTableError,
-)
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
 
+from src.lakebranch.catalog import ensure_namespace, ensure_table, init_catalog
 from src.lakebranch.config import load_config
 from src.lakebranch.runs import log_run
 from src.lakebranch.storage import get_provider
 
 load_dotenv()
-
-
-# -----------------------------------------------------------------------------
-# Catalog & namespace bootstrap
-# -----------------------------------------------------------------------------
-def init_catalog(config: dict[str, str]):
-    """Initialize the PyIceberg REST catalog pointing at Nessie."""
-    print(f"[nessie] Initializing REST catalog at {config['nessie_uri']}")
-
-    # Select the storage provider for the configured profile.
-    provider = get_provider(config)
-
-    catalog = load_catalog(
-        "nessie",
-        **{
-            "type": "rest",
-            "uri": config["nessie_uri"],
-            "warehouse": config["warehouse"],
-            **provider.catalog_properties(),
-        },
-    )
-    return catalog
-
-
-def ensure_namespace(catalog, namespace: str = "db") -> None:
-    """Load the given namespace, creating it if it does not exist."""
-    print(f"[nessie] Ensuring namespace '{namespace}' exists")
-    try:
-        catalog.load_namespace_properties(namespace)
-        print(f"[nessie] Namespace '{namespace}' already exists.")
-    except NoSuchNamespaceError:
-        try:
-            catalog.create_namespace(namespace)
-            print(f"[nessie] Created namespace '{namespace}'.")
-        except NamespaceAlreadyExistsError:
-            # Race-safe: another process created it between check and create.
-            print(f"[nessie] Namespace '{namespace}' already exists (created concurrently).")
 
 
 # -----------------------------------------------------------------------------
@@ -94,15 +52,8 @@ EVENTS_SCHEMA = Schema(
 def ensure_events_table(catalog):
     """Load or create the `db.events` table with the events schema."""
     print("[iceberg] Ensuring table 'db.events' exists")
-    try:
-        table = catalog.load_table("db.events")
-        print("[iceberg] Table 'db.events' already exists.")
-    except NoSuchTableError:
-        table = catalog.create_table(
-            "db.events",
-            schema=EVENTS_SCHEMA,
-        )
-        print("[iceberg] Created table 'db.events'.")
+    table = ensure_table(catalog, "db.events", EVENTS_SCHEMA)
+    print("[iceberg] Table 'db.events' ready.")
     return table
 
 

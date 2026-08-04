@@ -22,11 +22,6 @@ from __future__ import annotations
 import logging
 
 from airflow.hooks.base import BaseHook
-from pyiceberg.exceptions import (
-    NamespaceAlreadyExistsError,
-    NoSuchNamespaceError,
-    NoSuchTableError,
-)
 from pyiceberg.schema import Schema
 from pyiceberg.types import LongType, NestedField, StringType
 
@@ -78,6 +73,11 @@ class LakebranchHook(BaseHook):
         the repo root must be added to ``PYTHONPATH`` too.
         """
         try:
+            from src.lakebranch.catalog import (
+                ensure_namespace as catalog_ensure_namespace,
+                ensure_table as catalog_ensure_table,
+                init_catalog,
+            )
             from src.lakebranch.config import load_config
             from src.lakebranch.storage import get_provider
         except ImportError as exc:  # pragma: no cover - defensive
@@ -86,7 +86,7 @@ class LakebranchHook(BaseHook):
                 "on PYTHONPATH (in the Docker image it is /opt/lakebranch). "
                 "Original error: %s" % exc
             ) from exc
-        return load_config, get_provider
+        return load_config, get_provider, init_catalog, catalog_ensure_namespace, catalog_ensure_table
 
     # ------------------------------------------------------------------
     # Configuration & providers
@@ -94,14 +94,14 @@ class LakebranchHook(BaseHook):
     def get_config(self) -> dict[str, str]:
         """Load the profile-aware Lakebranch configuration (cached)."""
         if self._config is None:
-            load_config, _ = self._core_imports()
+            load_config, _, _, _, _ = self._core_imports()
             self._config = load_config()
         return self._config
 
     def get_provider(self):
         """Return the storage provider for the configured ``STORAGE_PROFILE``."""
         if self._provider is None:
-            _, get_provider = self._core_imports()
+            _, get_provider, _, _, _ = self._core_imports()
             self._provider = get_provider(self.get_config())
         return self._provider
 
@@ -117,33 +117,16 @@ class LakebranchHook(BaseHook):
     def get_catalog(self):
         """Build (and cache) the PyIceberg REST catalog pointing at Nessie."""
         if self._catalog is None:
-            from pyiceberg.catalog import load_catalog
-
+            _, _, init_catalog, _, _ = self._core_imports()
             config = self.get_config()
-            provider = self.get_provider()
-            self._catalog = load_catalog(
-                "nessie",
-                **{
-                    "type": "rest",
-                    "uri": config["nessie_uri"],
-                    "warehouse": config["warehouse"],
-                    **provider.catalog_properties(),
-                },
-            )
+            self._catalog = init_catalog(config)
             log.info("Initialized Nessie REST catalog at %s", config["nessie_uri"])
         return self._catalog
 
     def ensure_namespace(self, namespace: str = "db") -> None:
         """Load the namespace, creating it if it does not exist (race-safe)."""
-        catalog = self.get_catalog()
-        try:
-            catalog.load_namespace_properties(namespace)
-        except NoSuchNamespaceError:
-            try:
-                catalog.create_namespace(namespace)
-            except NamespaceAlreadyExistsError:
-                # Race-safe: another process created it between check and create.
-                pass
+        _, _, _, catalog_ensure_namespace, _ = self._core_imports()
+        catalog_ensure_namespace(self.get_catalog(), namespace)
 
     def get_table(self, table_name: str, schema: Schema | None = None, create_if_missing: bool = True):
         """Load a table, creating it with ``schema`` if it does not exist.
@@ -158,20 +141,15 @@ class LakebranchHook(BaseHook):
             The loaded PyIceberg table.
         """
         catalog = self.get_catalog()
-        try:
+        if not create_if_missing:
+            # Preserve the original semantics: raise when the table is absent.
             return catalog.load_table(table_name)
-        except NoSuchTableError:
-            if not create_if_missing:
-                raise
-            if schema is None:
-                raise ValueError(
-                    f"Table '{table_name}' does not exist and no schema was provided to create it."
-                )
-            namespace = table_name.rsplit(".", 1)[0] if "." in table_name else "default"
-            self.ensure_namespace(namespace)
-            table = catalog.create_table(table_name, schema=schema)
-            log.info("Created table '%s'", table_name)
-            return table
+        if schema is None:
+            raise ValueError(
+                f"Table '{table_name}' does not exist and no schema was provided to create it."
+            )
+        _, _, _, _, catalog_ensure_table = self._core_imports()
+        return catalog_ensure_table(catalog, table_name, schema)
 
     # ------------------------------------------------------------------
     # Airflow connection handling (logical placeholder)

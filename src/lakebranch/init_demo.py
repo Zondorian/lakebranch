@@ -6,16 +6,11 @@ import sys
 
 import pyarrow as pa
 from dotenv import load_dotenv
-from pyiceberg.catalog import load_catalog
-from pyiceberg.exceptions import (
-    NamespaceAlreadyExistsError,
-    NoSuchNamespaceError,
-    NoSuchTableError,
-)
 from pyiceberg.io.pyarrow import schema_to_pyarrow
 from pyiceberg.schema import Schema
 from pyiceberg.types import DoubleType, LongType, NestedField, StringType
 
+from src.lakebranch.catalog import ensure_namespace, ensure_table, init_catalog
 from src.lakebranch.config import load_config
 from src.lakebranch.runs import log_run
 from src.lakebranch.storage import get_provider
@@ -59,42 +54,6 @@ EVENTS_DATA = [
     {"event_id": 2, "event_type": "purchase", "timestamp": "2026-07-31T10:05:00Z"},
     {"event_id": 3, "event_type": "logout", "timestamp": "2026-07-31T10:10:00Z"},
 ]
-
-
-def init_catalog(config):
-    print(f"[nessie] Initializing REST catalog at {config['nessie_uri']}")
-    provider = get_provider(config)
-    return load_catalog(
-        "nessie",
-        **{
-            "type": "rest",
-            "uri": config["nessie_uri"],
-            "warehouse": config["warehouse"],
-            **provider.catalog_properties(),
-        },
-    )
-
-
-def ensure_namespace(catalog, namespace):
-    try:
-        catalog.load_namespace_properties(namespace)
-        print(f"[nessie] Namespace '{namespace}' exists.")
-    except NoSuchNamespaceError:
-        try:
-            catalog.create_namespace(namespace)
-            print(f"[nessie] Created namespace '{namespace}'.")
-        except NamespaceAlreadyExistsError:
-            pass
-
-
-def ensure_table(catalog, table_name, schema):
-    try:
-        table = catalog.load_table(table_name)
-        print(f"[iceberg] Table '{table_name}' exists.")
-    except NoSuchTableError:
-        table = catalog.create_table(table_name, schema=schema)
-        print(f"[iceberg] Created table '{table_name}'.")
-    return table
 
 
 def append_rows(table, rows, required_col):
