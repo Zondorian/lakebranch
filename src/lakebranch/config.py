@@ -10,8 +10,8 @@ Supported storage profiles:
     seaweedfs  - SeaweedFS (default, Apache 2.0, local dev)
     minio      - MinIO (AGPLv3, local dev)
     aws-s3     - AWS S3 (production / BYOC)
-    gcs        - Google Cloud Storage (not yet implemented)
-    adls       - Azure Data Lake Storage Gen2 (not yet implemented)
+    gcs        - Google Cloud Storage
+    adls       - Azure Data Lake Storage Gen2
     filesystem - Local filesystem (embedded / testing)
 
 Supported catalog profiles:
@@ -19,6 +19,9 @@ Supported catalog profiles:
                  remote Nessie server)
     sqlite     - PyIceberg SQLite catalog (Docker-free; pairs naturally with
                  STORAGE_PROFILE=filesystem)
+    postgres   - PyIceberg SQL catalog backed by a PostgreSQL database
+                 (CATALOG_URI, e.g. postgresql://user:pass@host:5432/iceberg).
+                 Server-backed like Nessie but without branch/tag versioning.
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ from dotenv import load_dotenv
 VALID_STORAGE_PROFILES = ("seaweedfs", "minio", "aws-s3", "gcs", "adls", "filesystem")
 
 # Valid catalog profiles
-VALID_CATALOG_PROFILES = ("nessie", "sqlite")
+VALID_CATALOG_PROFILES = ("nessie", "sqlite", "postgres")
 
 # Required environment variables per storage profile
 PROFILE_REQUIRED_VARS: dict[str, tuple[str, ...]] = {
@@ -47,6 +50,7 @@ PROFILE_REQUIRED_VARS: dict[str, tuple[str, ...]] = {
 CATALOG_REQUIRED_VARS: dict[str, tuple[str, ...]] = {
     "nessie": ("NESSIE_URI",),
     "sqlite": ("CATALOG_URI",),
+    "postgres": ("CATALOG_URI",),
 }
 
 # Shared variables required by all profiles

@@ -35,7 +35,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "pyiceberg[s3fs,pyarrow,sql-sqlite]",
+    "pyiceberg[s3fs,pyarrow,sql-sqlite,sql-postgres,gcsfs,adlfs]",
     "pandas",
     "duckdb",
     "python-dotenv",

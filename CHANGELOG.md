@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `pyiceberg[sql-sqlite]` extra added to `pyproject.toml` and `requirements.txt` (SQLAlchemy for the SQLite catalog).
 - `CATALOG_PROFILE` / `CATALOG_URI` documented in `.env.example` and the README configuration tables.
 - **GUI API integration tests** (`tests/test_api_integration.py`): exercise the real FastAPI app against the Docker-free SQLite catalog + filesystem warehouse via `TestClient` — table listing, write rows (auto-create), **time travel** (`GET /api/tables/{table}/rows?snapshot_id=…`), **snapshot diff** (`GET /api/tables/{table}/diff`), and the filter query runner (`POST /api/query`). All run in CI with no Docker or Nessie. `httpx` added to the `dev` extra (required by FastAPI `TestClient`).
+- **GCS storage profile** (`STORAGE_PROFILE=gcs`): new `src/lakebranch/storage/gcs.py` provider backed by `gcsfs` + PyIceberg's native GCS FileIO (via PyArrow). Routes `gs://` warehouse URIs, creates the bucket via `ensure_warehouse()`, and supplies `gcs.*` catalog properties. Auth via Application Default Credentials (or `GCS_TOKEN`). `pyiceberg[gcsfs]` extra added to `pyproject.toml` / `requirements.txt`.
+- **ADLS storage profile** (`STORAGE_PROFILE=adls`): new `src/lakebranch/storage/adls.py` provider backed by `adlfs` + PyIceberg's native Azure FileIO (via PyArrow ≥ 20, i.e. `AzureFileSystem`). Routes `abfss://` warehouse URIs, creates the container via `ensure_warehouse()`, and supplies `adls.*` catalog properties. Auth via the Azure credential chain (or `ADLS_ACCOUNT_KEY`). `pyiceberg[adlfs]` extra added to `pyproject.toml` / `requirements.txt`.
+- **PostgreSQL catalog profile** (`CATALOG_PROFILE=postgres`): `init_catalog()` now builds PyIceberg's `SqlCatalog` against a PostgreSQL database (`CATALOG_URI`, e.g. `postgresql://user:pass@host:5432/iceberg`) via SQLAlchemy + psycopg2. Server-backed like Nessie (multi-writer) but without branch/tag versioning; works with every storage profile (`seaweedfs`, `minio`, `aws-s3`, `gcs`, `adls`, `filesystem`). `pyiceberg[sql-postgres]` extra added to `pyproject.toml` / `requirements.txt`.
 
 ### Fixed
 
@@ -35,8 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Planned
 
-- GCS and ADLS storage profiles
-- PostgreSQL catalog support
+*(none — roadmap complete)*
 
 ## [0.1.0] - 2026-08-04
 

@@ -2,41 +2,11 @@
 
 from __future__ import annotations
 
+from src.lakebranch.storage.adls import ADLSProvider
 from src.lakebranch.storage.base import StorageProvider
 from src.lakebranch.storage.filesystem import FilesystemProvider
+from src.lakebranch.storage.gcs import GCSProvider
 from src.lakebranch.storage.s3_compat import S3CompatProvider
-
-
-class GCSProvider:
-    """Google Cloud Storage provider (not yet implemented)."""
-
-    def __init__(self, config: dict[str, str]) -> None:
-        raise NotImplementedError(
-            "The 'gcs' storage profile is not yet implemented. "
-            "Use 'seaweedfs', 'minio', 'aws-s3', or 'filesystem'."
-        )
-
-    def ensure_warehouse(self) -> None:  # pragma: no cover
-        raise NotImplementedError
-
-    def catalog_properties(self) -> dict[str, str]:  # pragma: no cover
-        raise NotImplementedError
-
-
-class ADLSProvider:
-    """Azure Data Lake Storage Gen2 provider (not yet implemented)."""
-
-    def __init__(self, config: dict[str, str]) -> None:
-        raise NotImplementedError(
-            "The 'adls' storage profile is not yet implemented. "
-            "Use 'seaweedfs', 'minio', 'aws-s3', or 'filesystem'."
-        )
-
-    def ensure_warehouse(self) -> None:  # pragma: no cover
-        raise NotImplementedError
-
-    def catalog_properties(self) -> dict[str, str]:  # pragma: no cover
-        raise NotImplementedError
 
 
 def get_provider(config: dict[str, str]) -> StorageProvider:
@@ -50,7 +20,6 @@ def get_provider(config: dict[str, str]) -> StorageProvider:
 
     Raises:
         ValueError: If the storage profile is unknown.
-        NotImplementedError: If the profile is recognized but not implemented.
     """
     profile = config["storage_profile"]
 

@@ -1,7 +1,7 @@
 # Lakebranch — Python dependencies
 # Install: pip install -r requirements.txt
 
-pyiceberg[s3fs,pyarrow,sql-sqlite]
+pyiceberg[s3fs,pyarrow,sql-sqlite,sql-postgres,gcsfs,adlfs]
 pandas
 duckdb
 python-dotenv

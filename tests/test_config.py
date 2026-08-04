@@ -85,3 +85,62 @@ def test_sqlite_profile_default_catalog_uri(monkeypatch):
     cfg = load_config()
     assert cfg["catalog_profile"] == "sqlite"
     assert cfg["catalog_uri"] == "sqlite:///.lakebranch/catalog.db"
+
+
+def test_gcs_storage_profile(monkeypatch):
+    monkeypatch.setenv("STORAGE_PROFILE", "gcs")
+    monkeypatch.setenv("GCS_BUCKET", "warehouse")
+    monkeypatch.setenv("GCS_PROJECT", "my-project")
+    monkeypatch.setenv("WAREHOUSE", "gs://warehouse")
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    cfg = load_config()
+    assert cfg["storage_profile"] == "gcs"
+    assert cfg["gcs_bucket"] == "warehouse"
+    assert cfg["gcs_project"] == "my-project"
+
+
+def test_gcs_missing_required_vars_raises(monkeypatch):
+    monkeypatch.setenv("STORAGE_PROFILE", "gcs")
+    monkeypatch.delenv("GCS_BUCKET", raising=False)
+    monkeypatch.delenv("GCS_PROJECT", raising=False)
+    monkeypatch.setenv("WAREHOUSE", "gs://warehouse")
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    with pytest.raises(RuntimeError, match="Missing required environment variables"):
+        load_config()
+
+
+def test_adls_storage_profile(monkeypatch):
+    monkeypatch.setenv("STORAGE_PROFILE", "adls")
+    monkeypatch.setenv("ADLS_ACCOUNT", "mystore")
+    monkeypatch.setenv("ADLS_CONTAINER", "warehouse")
+    monkeypatch.setenv("WAREHOUSE", "abfss://warehouse@mystore.dfs.core.windows.net")
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    cfg = load_config()
+    assert cfg["storage_profile"] == "adls"
+    assert cfg["adls_account"] == "mystore"
+    assert cfg["adls_container"] == "warehouse"
+
+
+def test_postgres_catalog_profile(monkeypatch):
+    monkeypatch.setenv("CATALOG_PROFILE", "postgres")
+    monkeypatch.setenv("STORAGE_PROFILE", "filesystem")
+    monkeypatch.setenv("FS_PATH", "./data/warehouse")
+    monkeypatch.setenv("WAREHOUSE", "data/warehouse")
+    monkeypatch.setenv("CATALOG_URI", "postgresql://user:pass@localhost:5432/iceberg")
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    cfg = load_config()
+    assert cfg["catalog_profile"] == "postgres"
+    assert cfg["catalog_uri"] == "postgresql://user:pass@localhost:5432/iceberg"
+
+
+def test_postgres_catalog_default_uri(monkeypatch):
+    """The postgres catalog profile falls back to the documented CATALOG_URI default."""
+    monkeypatch.setenv("CATALOG_PROFILE", "postgres")
+    monkeypatch.setenv("STORAGE_PROFILE", "filesystem")
+    monkeypatch.setenv("FS_PATH", "./data/warehouse")
+    monkeypatch.setenv("WAREHOUSE", "data/warehouse")
+    monkeypatch.delenv("CATALOG_URI", raising=False)
+    monkeypatch.setattr("src.lakebranch.config.load_dotenv", lambda **kwargs: None)
+    cfg = load_config()
+    assert cfg["catalog_profile"] == "postgres"
+    assert cfg["catalog_uri"] == "sqlite:///.lakebranch/catalog.db"

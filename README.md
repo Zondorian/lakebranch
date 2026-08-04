@@ -88,7 +88,7 @@ With the virtual environment active, install the project dependencies:
 pip install -r requirements.txt
 ```
 
-This installs `pyiceberg[s3fs,pyarrow,sql-sqlite]`, `pandas`, `duckdb`, and `python-dotenv`.
+This installs `pyiceberg[s3fs,pyarrow,sql-sqlite,sql-postgres,gcsfs,adlfs]`, `pandas`, `duckdb`, and `python-dotenv`.
 
 > **Note:** The `.venv/` directory is already excluded via `.gitignore`, so it won't be committed to version control.
 
@@ -420,8 +420,8 @@ Lakebranch supports multiple object storage backends via the `STORAGE_PROFILE` e
 | `seaweedfs` (default) | SeaweedFS | `docker/docker-compose.yml` | Apache 2.0 | Local development (default) |
 | `minio` | MinIO | `docker/docker-compose.minio.yml` | AGPLv3 | Local development (prefer MinIO web console) |
 | `aws-s3` | AWS S3 | `docker/docker-compose.prod-s3.yml` | — | Production / BYOC |
-| `gcs` | Google Cloud Storage | — | — | Cloud (not yet implemented) |
-| `adls` | Azure Data Lake Storage Gen2 | — | — | Cloud (not yet implemented) |
+| `gcs` | Google Cloud Storage | — | — | Cloud (native PyArrow GCS FileIO) |
+| `adls` | Azure Data Lake Storage Gen2 | — | — | Cloud (native PyArrow Azure FileIO) |
 | `filesystem` | Local filesystem | — | — | Embedded / testing |
 
 > **Visualization:** For a data preview (schema, first N rows, query runner) covering **all** storage profiles, use the **Lakebranch GUI** at [http://localhost:8787/ui/](http://localhost:8787/ui/) (see [Lakebranch GUI (Developer Preview)](#lakebranch-gui-developer-preview)). For catalog metadata (namespaces, tables, snapshots, branches/commits), use the **Nessie UI** at [http://localhost:19120](http://localhost:19120). For browsing the *data files* themselves, MinIO offers a web console at [http://localhost:9001](http://localhost:9001) (via `docker-compose.minio.yml`); the default SeaweedFS profile has no object-store file browser.
@@ -467,14 +467,16 @@ Lakebranch ships a clean storage abstraction layer in `src/lakebranch/storage/` 
 │   ├── base.py       → StorageProvider        │
 │   ├── factory.py    → get_provider()         │
 │   ├── s3_compat.py  → SeaweedFS/MinIO/AWS    │
-│   ├── filesystem.py → Local filesystem       │
-│   └── (gcs/adls)    → Not yet implemented    │
+│   ├── gcs.py        → Google Cloud Storage   │
+│   ├── adls.py       → Azure ADLS Gen2        │
+│   └── filesystem.py → Local filesystem       │
 └────────────────────┬─────────────────────────┘
-                     │ S3 API / local path
+                     │ S3 / gs / abfss / local
 ┌────────────────────▼─────────────────────────┐
 │  Catalog (selected via CATALOG_PROFILE)      │
 │  ├── Nessie REST Catalog (:19120)   [nessie] │
-│  └── SQLite Catalog (local file)    [sqlite] │
+│  ├── SQLite Catalog (local file)    [sqlite] │
+│  └── PostgreSQL Catalog (server)   [postgres]│
 └──────────────────────────────────────────────┘
 ```
 
@@ -505,8 +507,8 @@ You can swap out the storage layer for other S3-compatible or cloud options:
 | **SeaweedFS** (default) | Local, S3-compatible | Already configured — no changes needed | `seaweedfs` |
 | **MinIO** | Local, S3-compatible | Use `docker-compose.minio.yml` — no code changes | `minio` |
 | **AWS S3** | Cloud, S3-native | Use `docker-compose.prod-s3.yml` — no code changes | `aws-s3` |
-| **Google Cloud Storage (GCS)** | Cloud, S3-compatible | Use the GCS S3 interoperability endpoint (`https://storage.googleapis.com`) with GCS HMAC keys | `gcs` (planned) |
-| **Azure Blob Storage** | Cloud, S3-compatible | Use the Azure Blob S3-compatible endpoint with Azure storage account credentials | `adls` (planned) |
+| **Google Cloud Storage (GCS)** | Cloud, native GCS FileIO | `STORAGE_PROFILE=gcs` with `GCS_BUCKET` / `GCS_PROJECT`; `WAREHOUSE=gs://…` | `gcs` |
+| **Azure Data Lake Storage Gen2** | Cloud, native Azure FileIO | `STORAGE_PROFILE=adls` with `ADLS_ACCOUNT` / `ADLS_CONTAINER`; `WAREHOUSE=abfss://…` | `adls` |
 | **Local filesystem** | Local, non-S3 | Set `CATALOG_PROFILE=sqlite` + `STORAGE_PROFILE=filesystem` for a Docker-free stack; catalog metadata lives in a local `catalog.db` and data in `FS_PATH` | `filesystem` |
 
 ### Can I use a local database instead of Nessie?
@@ -517,12 +519,12 @@ Yes. Nessie is one of several Iceberg catalog implementations. PyIceberg support
 |---------|---------|------|-------|
 | **Nessie** (default) | `nessie` | REST catalog with Git-like versioning | Already configured — no changes needed |
 | **SQLite** | `sqlite` | Local file-based catalog | Simple, single-user, no server needed; pairs with `STORAGE_PROFILE=filesystem` for a Docker-free stack |
-| **PostgreSQL** | — | Database-backed catalog | Requires a running PostgreSQL instance |
+| **PostgreSQL** | `postgres` | Database-backed catalog (PyIceberg `SqlCatalog`) | Server-backed like Nessie (multi-writer) but no branch/tag versioning; works with every storage profile |
 | **Hive Metastore** | — | Traditional Hive catalog | Requires a Hive Metastore service |
 | **Glue** | — | AWS-managed catalog | Requires AWS account |
 | **In-memory** | — | Ephemeral catalog | Data lost on process exit; useful for testing only |
 
-Switch catalogs by setting `CATALOG_PROFILE` in `.env` (`nessie` | `sqlite`); `src/lakebranch/catalog.py` routes to the right PyIceberg catalog automatically. The default setup is wired for Nessie + SeaweedFS as the simplest fully-local combination, and `sqlite` + `filesystem` as the Docker-free combination.
+Switch catalogs by setting `CATALOG_PROFILE` in `.env` (`nessie` | `sqlite` | `postgres`); `src/lakebranch/catalog.py` routes to the right PyIceberg catalog automatically. The default setup is wired for Nessie + SeaweedFS as the simplest fully-local combination, and `sqlite` + `filesystem` as the Docker-free combination.
 
 ## Configuration
 
@@ -533,11 +535,11 @@ All configuration is driven by the `.env` file at the project root:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `STORAGE_PROFILE` | Object storage backend (`seaweedfs`, `minio`, `aws-s3`, `gcs`, `adls`, `filesystem`) | `seaweedfs` |
-| `CATALOG_PROFILE` | Iceberg catalog backend (`nessie` \| `sqlite`) | `nessie` |
+| `CATALOG_PROFILE` | Iceberg catalog backend (`nessie` \| `sqlite` \| `postgres`) | `nessie` |
 | `MINIO_ROOT_USER` | Object store root access key (also used by Nessie via AWS credentials) | `minioadmin` |
 | `MINIO_ROOT_PASSWORD` | Object store root secret key (also used by Nessie via AWS credentials) | `minioadmin` |
 | `NESSIE_URI` | Nessie REST catalog endpoint used by PyIceberg (profile: `nessie`) | `http://localhost:19120/iceberg/main` |
-| `CATALOG_URI` | SQLAlchemy URI for the SQLite catalog DB (profile: `sqlite`) | `sqlite:///.lakebranch/catalog.db` |
+| `CATALOG_URI` | SQLAlchemy URI for the SQL catalog DB (profiles: `sqlite`, `postgres`) | `sqlite:///.lakebranch/catalog.db` |
 | `WAREHOUSE` | Name of the warehouse (maps to the object store bucket or local directory) | `warehouse` |
 | `S3_ENDPOINT` | S3 API endpoint used by PyIceberg/s3fs | `http://localhost:9000` |
 | `S3_ACCESS_KEY` | S3 access key for PyIceberg/s3fs | `minioadmin` |
@@ -630,6 +632,8 @@ Lakebranch/
             ├── base.py           # StorageProvider protocol
             ├── factory.py        # get_provider() dispatcher
             ├── s3_compat.py      # SeaweedFS / MinIO / AWS S3 provider
+            ├── gcs.py            # Google Cloud Storage provider
+            ├── adls.py           # Azure ADLS Gen2 provider
             └── filesystem.py     # Local filesystem provider
 ```
 

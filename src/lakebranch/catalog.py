@@ -6,13 +6,16 @@ Single source of truth for PyIceberg catalog bootstrap: building the catalog
 for the configured catalog + storage profiles, and race-safe namespace / table
 creation.
 
-Two catalog backends are supported, selected via ``CATALOG_PROFILE``:
+Three catalog backends are supported, selected via ``CATALOG_PROFILE``:
 
 - ``nessie`` (default) — Nessie REST catalog, typically backed by SeaweedFS /
   MinIO / AWS S3 via the storage provider.
 - ``sqlite`` — PyIceberg SQLite catalog (a single local ``.db`` file via
   SQLAlchemy). Pairs naturally with ``STORAGE_PROFILE=filesystem`` for a fully
   Docker-free stack: no containers, no network, everything on disk.
+- ``postgres`` — PyIceberg SQL catalog backed by a PostgreSQL database (via
+  SQLAlchemy + psycopg2). Server-backed like Nessie, but without branch/tag
+  versioning; works with every storage profile.
 
 The catalog bootstrap pattern was previously duplicated in four places
 (``write_iceberg.py``, ``init_demo.py``, ``api/app.py``, the Airflow demo DAG
@@ -136,13 +139,44 @@ def _init_sqlite_catalog(config: dict[str, str]):
     )
 
 
+def _init_postgres_catalog(config: dict[str, str]):
+    """Build the PyIceberg SQL catalog backed by a PostgreSQL database.
+
+    The catalog database URI (e.g. ``postgresql://user:pass@host:5432/lakebranch``)
+    comes from ``CATALOG_URI``. The warehouse location is a cloud object-store
+    URI (``s3://``, ``gs://``, ``abfss://``) or a local path, supplied by the
+    storage provider via the ``WAREHOUSE`` setting.
+
+    PostgreSQL is server-backed: multiple writers can share one catalog, and it
+    works with every storage profile. Unlike Nessie it has no branch/tag
+    versioning.
+    """
+    from pyiceberg.catalog.sql import SqlCatalog
+
+    warehouse = config["warehouse"]
+    if config.get("storage_profile") == "filesystem":
+        warehouse = config["fs_path"]
+
+    # PostgreSQL requires its own server; parent-directory creation and the
+    # file:// rendering dance needed for SQLite do not apply.
+    log.info("Initializing PostgreSQL catalog at %s (warehouse=%s)", config["catalog_uri"], warehouse)
+    return SqlCatalog(
+        "lakebranch",
+        type="sql",
+        uri=config["catalog_uri"],
+        warehouse=warehouse,
+        init_catalog_tables="true",
+    )
+
+
 def init_catalog(config: dict[str, str]):
     """Build the PyIceberg catalog for the configured catalog + storage profiles.
 
-    Selects between the Nessie REST catalog and the SQLite catalog based on
-    ``CATALOG_PROFILE`` (``nessie`` | ``sqlite``). The Nessie path uses the
-    storage provider (selected via ``STORAGE_PROFILE``) to supply the catalog
-    properties (e.g. S3 endpoint/credentials).
+    Selects between the Nessie REST catalog, the SQLite catalog, and the
+    PostgreSQL SQL catalog based on ``CATALOG_PROFILE`` (``nessie`` |
+    ``sqlite`` | ``postgres``). The Nessie path uses the storage provider
+    (selected via ``STORAGE_PROFILE``) to supply the catalog properties (e.g.
+    S3 endpoint/credentials).
 
     Args:
         config: The config dict from ``lakebranch.config.load_config()``.
@@ -158,8 +192,10 @@ def init_catalog(config: dict[str, str]):
         return _init_nessie_catalog(config)
     if profile == "sqlite":
         return _init_sqlite_catalog(config)
+    if profile == "postgres":
+        return _init_postgres_catalog(config)
     raise ValueError(
-        f"Unknown catalog profile '{profile}'. Valid values: nessie, sqlite"
+        f"Unknown catalog profile '{profile}'. Valid values: nessie, sqlite, postgres"
     )
 
 

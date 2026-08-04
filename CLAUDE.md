@@ -41,8 +41,8 @@ The README's [CHANGELOG](CHANGELOG.md) tracks the full roadmap. Near-term priori
 - [x] SQLite catalog support — done, via `CATALOG_PROFILE=sqlite` (PyIceberg SQLite catalog); pairs with `STORAGE_PROFILE=filesystem` for a Docker-free stack
 - [x] GUI: add Nessie branch management (create/merge branches — the "undo/redo for data" story) — done, via `src/lakebranch/nessie.py` (Nessie REST v2 tree API client) + `GET/POST /api/branches` / `POST /api/branches/merge` / `DELETE /api/branches/{name}` + a GUI Branches panel; tested with a fake HTTP session (Docker-free)
 - [x] Add a bundled query engine (e.g. DuckDB via pyiceberg) so quickstart supports SQL out of the box — done, via `src/lakebranch/sql.py` + `lakebranch sql` CLI + `POST /api/sql` + GUI SQL panel
-- [ ] GCS and ADLS storage profiles (currently "planned" in README)
-- [ ] PostgreSQL catalog support (currently only Nessie + SQLite are wired)
+- [x] GCS and ADLS storage profiles — done, via `src/lakebranch/storage/gcs.py` + `src/lakebranch/storage/adls.py` (native PyIceberg `PyArrowFileIO` GCS/Azure backends; `STORAGE_PROFILE=gcs|adls`)
+- [x] PostgreSQL catalog support — done, via `CATALOG_PROFILE=postgres` (PyIceberg `SqlCatalog` backed by PostgreSQL; works with every storage profile)
 
 ## Commands & conventions
 
@@ -86,8 +86,8 @@ docker compose -f docker/docker-compose.airflow.yml up -d --build
 
 - **Python style:** src-layout (`src/lakebranch/`), package-relative imports, tests in `tests/` (run with `pytest`).
 - **Env config:** never touch `.env` (git-ignored, secrets); edit `.env.example` for commit-safe changes.
-- **Storage profile:** set `STORAGE_PROFILE` in `.env` (`seaweedfs` | `minio` | `aws-s3` | `filesystem`).
-- **Catalog profile:** set `CATALOG_PROFILE` in `.env` (`nessie` | `sqlite`). For a Docker-free stack: `STORAGE_PROFILE=filesystem CATALOG_PROFILE=sqlite` → `lakebranch pipeline`.
+- **Storage profile:** set `STORAGE_PROFILE` in `.env` (`seaweedfs` | `minio` | `aws-s3` | `gcs` | `adls` | `filesystem`).
+- **Catalog profile:** set `CATALOG_PROFILE` in `.env` (`nessie` | `sqlite` | `postgres`). For a Docker-free stack: `STORAGE_PROFILE=filesystem CATALOG_PROFILE=sqlite` → `lakebranch pipeline`.
 - **Licensing:** everything is Apache 2.0 — the core, the GUI, the Docker profiles, and the Airflow provider. No parts planned for closed-source re-licensing.
 
 ## Key file map

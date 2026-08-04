@@ -112,3 +112,38 @@ def test_ensure_table_race_safe(fake_catalog):
 
     table = ensure_table(fake_catalog, "db.events", schema)
     assert table["name"] == "db.events"
+
+
+def test_init_catalog_routes_postgres(monkeypatch):
+    """init_catalog builds a SqlCatalog for the postgres profile."""
+    import pyiceberg.catalog.sql as sql_mod
+
+    created = {}
+
+    class _FakeSqlCatalog:
+        def __init__(self, name, **kwargs):
+            created["name"] = name
+            created["kwargs"] = kwargs
+
+    monkeypatch.setattr(sql_mod, "SqlCatalog", _FakeSqlCatalog)
+
+    cfg = {
+        "catalog_profile": "postgres",
+        "storage_profile": "filesystem",
+        "catalog_uri": "postgresql://user:pass@localhost:5432/iceberg",
+        "fs_path": "./data/warehouse",
+        "warehouse": "data/warehouse",
+    }
+    result = catalog.init_catalog(cfg)
+    assert isinstance(result, _FakeSqlCatalog)
+    assert created["name"] == "lakebranch"
+    assert created["kwargs"]["uri"] == "postgresql://user:pass@localhost:5432/iceberg"
+    # With STORAGE_PROFILE=filesystem, the warehouse follows FS_PATH (same
+    # convention as the SQLite catalog).
+    assert created["kwargs"]["warehouse"] == "./data/warehouse"
+    assert created["kwargs"]["type"] == "sql"
+
+
+def test_init_catalog_unknown_profile_raises():
+    with pytest.raises(ValueError, match="Unknown catalog profile"):
+        catalog.init_catalog({"catalog_profile": "bogus"})
