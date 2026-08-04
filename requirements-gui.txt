@@ -1,0 +1,6 @@
+# Lakebranch — GUI (Developer Preview) dependencies
+# Install: pip install -r requirements-gui.txt
+# Do NOT add these to requirements.txt (core stays dependency-light).
+
+fastapi
+uvicorn[standard]

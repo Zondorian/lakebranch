@@ -1,0 +1,65 @@
+# =============================================================================
+# Lakebranch — Docker Compose: Nessie + AWS S3 (Production / BYOC Template)
+# =============================================================================
+# Services:
+#   nessie : Iceberg REST catalog server  (REST API :19120)
+#
+# Usage:
+#   docker compose -f docker/docker-compose.prod-s3.yml up -d
+#
+# This is the production / BYOC (Bring Your Own Cloud) template. It runs
+# Nessie ONLY — there is no object-store container. Nessie points directly
+# at AWS S3, which is the default S3 endpoint (no `endpoint` or
+# `external-endpoint` properties needed).
+#
+# Required environment variables (set in your shell or a .env file):
+#   AWS_ACCESS_KEY_ID       - AWS access key
+#   AWS_SECRET_ACCESS_KEY   - AWS secret key
+#   AWS_REGION              - AWS region (e.g., us-east-1)
+#   S3_BUCKET               - S3 bucket backing the warehouse
+#
+# Note: The S3 bucket must already exist. Nessie does not create it.
+# Pin image tags to specific versions for production deployments.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Nessie — Iceberg REST Catalog (pointing at AWS S3)
+  # ---------------------------------------------------------------------------
+  # Nessie runs as a REST catalog server. The warehouse "warehouse" is
+  # configured to use the AWS S3 bucket "${S3_BUCKET}". Nessie needs
+  # server-side S3 configuration to manage table locations. The Quarkus
+  # catalog service path "nessie.catalog.service.s3.default-options"
+  # configures the S3 object store. APPLICATION_GLOBAL auth type uses the
+  # default AWS credentials provider chain, picking up AWS_ACCESS_KEY_ID /
+  # AWS_SECRET_ACCESS_KEY from the environment.
+  #
+  # path-style-access is set to false because AWS S3 uses virtual-hosted
+  # addressing (the default). No endpoint is specified because AWS S3 is
+  # the default S3 endpoint.
+  # ---------------------------------------------------------------------------
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.104.7
+    container_name: lakebranch-nessie
+    restart: unless-stopped
+    ports:
+      - "19120:19120" # Nessie REST API
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      JDK_JAVA_OPTIONS: >-
+        -Dnessie.catalog.default-warehouse=warehouse
+        -Dnessie.catalog.warehouses.warehouse.location=s3://${S3_BUCKET}
+        -Dnessie.catalog.service.s3.default-options.path-style-access=false
+        -Dnessie.catalog.service.s3.default-options.auth-type=APPLICATION_GLOBAL
+    networks:
+      - lakebranch
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  lakebranch:
+    name: lakebranch-net
+    driver: bridge

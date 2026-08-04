@@ -1,0 +1,23 @@
+# Keep dependencies up to date automagically.
+# See https://docs.github.com/en/code-security/dependabot for configuration docs.
+
+version: 2
+updates:
+  # Python dependencies (core package + dev/tooling extras)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+
+  # GitHub Actions workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "ci"
+      - "dependencies"

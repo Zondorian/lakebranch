@@ -1,0 +1,45 @@
+# =============================================================================
+# Lakebranch — Airflow Provider (Standalone Package)
+# =============================================================================
+# The Lakebranch Airflow provider makes "write to Iceberg via Lakebranch" a
+# one-operator DAG. The package is versioned and released independently from
+# the Lakebranch core, and is fully Apache 2.0 like the rest of the project.
+# =============================================================================
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apache-airflow-providers-lakebranch"
+version = "0.1.0"
+description = "Lakebranch Airflow provider: write to Iceberg via Lakebranch in a one-operator DAG."
+readme = "README.md"
+requires-python = ">=3.9"
+license = "Apache-2.0"
+authors = [{ name = "Lakebranch" }]
+keywords = ["airflow", "iceberg", "lakebranch", "nessie", "s3", "data-lake"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Plugins",
+    "Framework :: Apache Airflow",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "apache-airflow>=2.10",
+    "pyiceberg[s3fs,pyarrow]",
+    "python-dotenv",
+    "pandas",
+]
+
+[project.entry-points."apache_airflow_provider"]
+lakebranch = "lakebranch_provider:get_provider_info"
+
+[tool.setuptools]
+packages = [
+    "lakebranch_provider",
+    "lakebranch_provider.hooks",
+    "lakebranch_provider.operators",
+    "lakebranch_provider.example_dags",
+]

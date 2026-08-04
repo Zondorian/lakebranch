@@ -1,0 +1,74 @@
+# =============================================================================
+# Lakebranch — Build Configuration
+# =============================================================================
+# The Lakebranch core is Apache 2.0 licensed. This pyproject makes the core an
+# installable package (`pip install -e .`) with a `lakebranch` CLI.
+#
+# The package path is `src.lakebranch` (NOT `lakebranch`) — this preserves the
+# project-wide import convention used by the Airflow DAGs, the provider, and
+# the README examples, so `pip install -e .` and the repo-on-PYTHONPATH
+# workflow are interchangeable.
+#
+# Install:
+#   pip install -e .            # core + CLI
+#   pip install -e ".[gui]"     # + FastAPI/uvicorn for the web UI
+#   pip install -e ".[dev]"     # + pytest for the test suite
+# =============================================================================
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lakebranch"
+version = "0.1.0"
+description = "Local-first Apache Iceberg data lakehouse built on Nessie + SeaweedFS."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Lakebranch" }]
+keywords = ["iceberg", "nessie", "data-lake", "lakehouse", "s3", "duckdb"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "pyiceberg[s3fs,pyarrow]",
+    "pandas",
+    "duckdb",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+# NOTE: requirements.txt / requirements-gui.txt remain the source of truth for
+# the Docker workflows; this pyproject is the pip-installable packaging.
+gui = [
+    "fastapi",
+    "uvicorn",
+]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "ruff",
+]
+
+[project.scripts]
+lakebranch = "src.lakebranch.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.setuptools.package-data]
+"src.lakebranch" = ["ui/*.html"]
+
+[tool.ruff.lint]
+# Project supports Python 3.10+; PYI034 (prefer `Self`) requires Python 3.11+,
+# so it is disabled to stay compatible with the 3.10 CI matrix.
+extend-ignore = ["PYI034"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

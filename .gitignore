@@ -1,0 +1,93 @@
+# =============================================================================
+# Lakebranch — Git Ignore
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Environment & secrets
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# -----------------------------------------------------------------------------
+# Diagnostic / temporary scripts (troubleshooting leftovers)
+# -----------------------------------------------------------------------------
+# Common naming patterns for ad-hoc diagnostic, debug, and scratch scripts.
+# NOTE: *_test.py / test_*.py are intentionally NOT ignored here — tests in
+# tests/ are committed source.
+*_debug.py
+*_diag.py
+*_tmp.py
+*_temp.py
+*_scratch.py
+*_probe.py
+*_check.py
+*_verify.py
+*_explore.py
+*_sandbox.py
+debug_*.py
+diag_*.py
+tmp_*.py
+temp_*.py
+scratch_*.py
+probe_*.py
+check_*.py
+verify_*.py
+explore_*.py
+sandbox_*.py
+*.ipynb_checkpoints/
+
+# -----------------------------------------------------------------------------
+# Docker & local data
+# -----------------------------------------------------------------------------
+docker/data/
+docker/volumes/
+# Local filesystem warehouse (profile=filesystem)
+data/
+# Pipeline run-log database (DuckDB)
+.lakebranch/
+
+# -----------------------------------------------------------------------------
+# IDE & Editor
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.code-workspace
+
+# -----------------------------------------------------------------------------
+# OS
+# -----------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# -----------------------------------------------------------------------------
+# Logs
+# -----------------------------------------------------------------------------
+*.log
+logs/

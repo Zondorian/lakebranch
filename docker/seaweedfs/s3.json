@@ -1,0 +1,11 @@
+{
+  "identities": [
+    {
+      "name": "lakebranch",
+      "credentials": [
+        { "accessKey": "minioadmin", "secretKey": "minioadmin" }
+      ],
+      "actions": ["Admin", "Read", "Write", "List"]
+    }
+  ]
+}

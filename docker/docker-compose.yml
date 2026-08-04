@@ -1,0 +1,102 @@
+# =============================================================================
+# Lakebranch — Docker Compose: SeaweedFS + Nessie (Default Dev Profile)
+# =============================================================================
+# Services:
+#   seaweedfs : S3-compatible object storage  (S3 API :9000, Master :9333, Volume :8080)
+#   nessie    : Iceberg REST catalog server   (REST API :19120)
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml --env-file .env up -d
+#
+# Alternative profiles:
+#   - MinIO (preferred by some for its web console):
+#       docker compose -f docker/docker-compose.minio.yml --env-file .env up -d
+#   - Production / BYOC (Nessie pointing directly at AWS S3, no object-store container):
+#       docker compose -f docker/docker-compose.prod-s3.yml up -d
+#
+# Note: Pin image tags to specific versions for production deployments.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # SeaweedFS — S3-Compatible Object Storage (Apache 2.0 licensed)
+  # ---------------------------------------------------------------------------
+  # SeaweedFS runs master + volume + S3 gateway in a single process. The S3
+  # credentials are configured via a JSON file mounted read-only. SeaweedFS is
+  # Apache 2.0 licensed, avoiding the AGPLv3 copyleft concerns of MinIO for
+  # any future hosted/SaaS evolution of Lakebranch.
+  # ---------------------------------------------------------------------------
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: lakebranch-seaweedfs
+    restart: unless-stopped
+    ports:
+      - "9000:9000" # S3 API
+      - "9333:9333" # Master
+      - "18080:8080" # Volume (host port moved off 8080 so Airflow's webserver can bind 8080)
+    command: server -s3 -s3.port=9000 -s3.config=/etc/seaweedfs/s3.json
+    volumes:
+      - seaweedfs-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9333/cluster/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lakebranch
+
+  # ---------------------------------------------------------------------------
+  # Nessie — Iceberg REST Catalog
+  # ---------------------------------------------------------------------------
+  # Nessie runs as a REST catalog server. The warehouse "warehouse" is
+  # configured to use the SeaweedFS S3 bucket "warehouse". Nessie needs
+  # server-side S3 configuration to manage table locations. The Quarkus catalog
+  # service path "nessie.catalog.service.s3.default-options" configures the S3
+  # object store. APPLICATION_GLOBAL auth type uses the default AWS credentials
+  # provider chain, picking up AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY from
+  # the environment.
+  # ---------------------------------------------------------------------------
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.104.7
+    container_name: lakebranch-nessie
+    restart: unless-stopped
+    ports:
+      - "19120:19120" # Nessie REST API
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
+      # external-endpoint is what Nessie tells external clients (pyiceberg) to
+      # use for S3. host.docker.internal makes it reachable both from host CLI
+      # runs (Docker Desktop resolves it to localhost) and from Airflow
+      # containers (resolved via the host-gateway extra_hosts entry). Plain
+      # localhost would point Airflow containers at themselves.
+      JDK_JAVA_OPTIONS: >-
+        -Dnessie.catalog.default-warehouse=warehouse
+        -Dnessie.catalog.warehouses.warehouse.location=s3://warehouse
+        -Dnessie.catalog.service.s3.default-options.endpoint=http://seaweedfs:9000
+        -Dnessie.catalog.service.s3.default-options.external-endpoint=http://host.docker.internal:9000
+        -Dnessie.catalog.service.s3.default-options.path-style-access=true
+        -Dnessie.catalog.service.s3.default-options.auth-type=APPLICATION_GLOBAL
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    networks:
+      - lakebranch
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  seaweedfs-data:
+    name: lakebranch-seaweedfs-data
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  lakebranch:
+    name: lakebranch-net
+    driver: bridge

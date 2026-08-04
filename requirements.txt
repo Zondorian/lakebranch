@@ -1,0 +1,7 @@
+# Lakebranch — Python dependencies
+# Install: pip install -r requirements.txt
+
+pyiceberg[s3fs,pyarrow]
+pandas
+duckdb
+python-dotenv

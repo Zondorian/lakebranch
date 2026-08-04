@@ -1,0 +1,34 @@
+# Normalize line endings for text files shared across platforms.
+# Auto-detects text vs binary so image/binaries are never corrupted.
+* text=auto
+
+# Explicit LF for code/config/docs (contributors on Windows, macOS, Linux).
+*.py       text eol=lf
+*.pyi      text eol=lf
+*.toml     text eol=lf
+*.yml      text eol=lf
+*.yaml     text eol=lf
+*.md       text eol=lf
+*.html     text eol=lf
+*.css      text eol=lf
+*.js       text eol=lf
+*.json     text eol=lf
+*.txt      text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# Windows-specific scripts keep CRLF (for cmd.exe compatibility).
+*.bat      text eol=crlf
+*.cmd      text eol=crlf
+*.ps1      text eol=crlf
+
+# Binary / non-text files must never be treated as text.
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.ico      binary
+*.pdf      binary
+*.gz       binary
+*.whl      binary
+*.duckdb   binary

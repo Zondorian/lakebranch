@@ -1,0 +1,93 @@
+# =============================================================================
+# Lakebranch — Docker Compose: MinIO + Nessie (Alternative Profile)
+# =============================================================================
+# Services:
+#   minio  : S3-compatible object storage  (S3 API :9000, Web Console :9001)
+#   nessie : Iceberg REST catalog server  (REST API :19120)
+#
+# Usage:
+#   docker compose -f docker/docker-compose.minio.yml --env-file .env up -d
+#
+# This is the alternative profile for users who prefer MinIO's web console.
+# The default profile uses SeaweedFS (Apache 2.0) instead:
+#   docker compose -f docker/docker-compose.yml --env-file .env up -d
+#
+# Note: MinIO is AGPLv3 licensed. This is fine for local development, but
+# review licensing implications before using MinIO in a hosted/SaaS product.
+# Pin image tags to specific versions for production deployments.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # MinIO — S3-Compatible Object Storage
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: lakebranch-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # Web Console
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lakebranch
+
+  # ---------------------------------------------------------------------------
+  # Nessie — Iceberg REST Catalog
+  # ---------------------------------------------------------------------------
+  # Nessie runs as a REST catalog server. The warehouse "warehouse" is
+  # configured to use the MinIO S3 bucket "warehouse". Nessie needs server-side
+  # S3 configuration to manage table locations. The Quarkus catalog service
+  # path "nessie.catalog.service.s3.default-options" configures the S3 object
+  # store. APPLICATION_GLOBAL auth type uses the default AWS credentials
+  # provider chain, picking up AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY from
+  # the environment.
+  # ---------------------------------------------------------------------------
+  nessie:
+    image: ghcr.io/projectnessie/nessie:0.104.7
+    container_name: lakebranch-nessie
+    restart: unless-stopped
+    ports:
+      - "19120:19120" # Nessie REST API
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
+      JDK_JAVA_OPTIONS: >-
+        -Dnessie.catalog.default-warehouse=warehouse
+        -Dnessie.catalog.warehouses.warehouse.location=s3://warehouse
+        -Dnessie.catalog.service.s3.default-options.endpoint=http://minio:9000
+        -Dnessie.catalog.service.s3.default-options.external-endpoint=http://localhost:9000
+        -Dnessie.catalog.service.s3.default-options.path-style-access=true
+        -Dnessie.catalog.service.s3.default-options.auth-type=APPLICATION_GLOBAL
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - lakebranch
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  minio-data:
+    name: lakebranch-minio-data
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  lakebranch:
+    name: lakebranch-net
+    driver: bridge

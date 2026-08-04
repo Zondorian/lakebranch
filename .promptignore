@@ -1,0 +1,49 @@
+# =============================================================================
+# .promptignore — Files excluded from AI assistant context
+# =============================================================================
+# Prevents AI coding assistants from reading sensitive or irrelevant files.
+# Format follows .gitignore conventions.
+# =============================================================================
+
+# Environment & secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+
+# Docker
+docker/data/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/

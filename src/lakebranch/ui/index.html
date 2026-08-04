@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lakebranch — Developer Preview</title>
+<style>
+  :root {
+    --bg: #0f1420;
+    --bg-panel: #161d2e;
+    --bg-hover: #1e2740;
+    --border: #26324d;
+    --text: #e6ebf5;
+    --text-dim: #8b97b0;
+    --accent: #4f8cff;
+    --accent-soft: rgba(79, 140, 255, 0.15);
+    --success: #3ecf8e;
+    --danger: #ff6b6b;
+    --warning: #ffb84d;
+    --radius: 8px;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ---------- Header ---------- */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 22px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #131a2b, #10151f);
+  }
+  header .brand { display: flex; align-items: center; gap: 10px; }
+  header .logo {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: linear-gradient(135deg, var(--accent), #7cc0ff);
+    display: grid; place-items: center;
+    color: #0f1420; font-weight: 800; font-size: 13px;
+  }
+  header h1 { font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }
+  header .badge {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--warning);
+    border: 1px solid rgba(255, 184, 77, 0.4);
+    background: rgba(255, 184, 77, 0.1);
+    padding: 3px 8px;
+    border-radius: 99px;
+  }
+  header .status {
+    font-size: 12px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-dim); display: inline-block;
+  }
+  .dot.ok { background: var(--success); box-shadow: 0 0 6px var(--success); }
+  .dot.err { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+
+  /* ---------- Layout ---------- */
+  main {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    gap: 0;
+    height: calc(100vh - 57px);
+  }
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; height: auto; }
+  }
+
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .panel-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-head h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); }
+  .panel-head .count { font-size: 12px; color: var(--accent); font-family: var(--mono); }
+
+  /* ---------- Left column ---------- */
+  .left {
+    display: flex; flex-direction: column; gap: 14px;
+    padding: 14px; overflow-y: auto;
+  }
+  .table-list { list-style: none; overflow-y: auto; }
+  .table-list li {
+    padding: 9px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text);
+    border: 1px solid transparent;
+  }
+  .table-list li:hover { background: var(--bg-hover); }
+  .table-list li.active { background: var(--accent-soft); border-color: rgba(79, 140, 255, 0.5); color: #fff; }
+  .table-list .ns { color: var(--text-dim); }
+  .table-list .empty, .table-list .error { padding: 10px 12px; color: var(--text-dim); font-size: 13px; }
+  .table-list .error { color: var(--danger); }
+
+  .ns-tag {
+    font-family: var(--mono); font-size: 11px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 1px 7px; border-radius: 99px;
+  }
+
+  /* ---------- Center column ---------- */
+  .center { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+
+  .placeholder {
+    height: 100%; display: grid; place-items: center;
+    color: var(--text-dim); text-align: center; padding: 40px;
+  }
+  .placeholder strong { display: block; color: var(--text); font-size: 16px; margin-bottom: 6px; }
+
+  /* ---------- Tables / grids ---------- */
+  .grid { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .grid th {
+    text-align: left; padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border-bottom: 1px solid var(--border);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--text-dim); position: sticky; top: 0;
+    white-space: nowrap;
+  }
+  .grid td {
+    padding: 7px 12px;
+    border-bottom: 1px solid rgba(38, 50, 77, 0.6);
+    font-family: var(--mono); font-size: 12.5px;
+    white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+  }
+  .grid tbody tr:hover { background: var(--bg-hover); }
+  .grid-wrap { overflow: auto; max-height: 320px; border: 1px solid var(--border); border-radius: var(--radius); }
+
+  .kv { display: grid; grid-template-columns: 180px 1fr; gap: 6px 16px; font-size: 13px; }
+  .kv dt { color: var(--text-dim); font-family: var(--mono); font-size: 12px; }
+  .kv dd { font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+
+  .section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-dim); margin-bottom: 8px; }
+
+  /* ---------- Runs ---------- */
+  .run-list { list-style: none; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+  .run-item {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 9px 12px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .run-item .top { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  .run-item .pipeline { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .run-item .meta { font-size: 11.5px; color: var(--text-dim); margin-top: 4px; font-family: var(--mono); }
+  .status-pill { font-size: 11px; padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .status-pill.success { color: var(--success); background: rgba(62, 207, 142, 0.12); }
+  .status-pill.failed { color: var(--danger); background: rgba(255, 107, 107, 0.12); }
+
+  /* ---------- Query runner ---------- */
+  .query-bar {
+    display: flex; gap: 8px; margin-bottom: 10px; margin-top: 4px;
+  }
+  .query-bar select, .query-bar input {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; font-size: 13px; font-family: var(--mono);
+  }
+  .query-bar select { flex: 0 0 220px; }
+  .query-bar input { flex: 1; }
+  .query-bar button {
+    background: var(--accent); color: #0f1420; border: none;
+    padding: 8px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;
+  }
+  .query-bar button:hover { filter: brightness(1.15); }
+  .query-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .notice { font-size: 12.5px; color: var(--text-dim); padding: 8px 0; }
+  .error-box {
+    background: rgba(255, 107, 107, 0.08);
+    border: 1px solid rgba(255, 107, 107, 0.35);
+    color: var(--danger);
+    padding: 10px 14px; border-radius: 6px; font-size: 13px;
+    font-family: var(--mono); margin: 8px 0;
+    white-space: pre-wrap; word-break: break-word;
+  }
+
+  /* ---------- Time travel / snapshot diff ---------- */
+  .tt-bar {
+    display: flex; gap: 8px; margin-bottom: 10px; margin-top: 4px; flex-wrap: wrap;
+    align-items: center;
+  }
+  .tt-bar select, .tt-bar button {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; font-size: 13px; font-family: var(--mono);
+  }
+  .tt-bar select { flex: 1; min-width: 180px; }
+  .tt-bar button {
+    background: var(--accent); color: #0f1420; border: none;
+    padding: 8px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;
+  }
+  .tt-bar button:hover { filter: brightness(1.15); }
+  .tt-bar button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .tt-note { font-size: 12px; color: var(--text-dim); margin: 6px 0 10px; }
+  .diff-added td { background: rgba(62, 207, 142, 0.10); }
+  .diff-added .tag, .diff-removed .tag {
+    font-size: 11px; font-weight: 700; letter-spacing: 0.4px;
+    padding: 1px 6px; border-radius: 99px;
+  }
+  .diff-added .tag { color: var(--success); background: rgba(62, 207, 142, 0.15); }
+  .diff-removed .tag { color: var(--danger); background: rgba(255, 107, 107, 0.15); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="logo">L</div>
+    <h1>Lakebranch</h1>
+    <span class="badge">Dev Preview</span>
+  </div>
+  <div class="status" id="api-status">connecting…</div>
+</header>
+
+<main>
+  <!-- Left: tables -->
+  <section class="left">
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Tables</h2>
+        <span class="count" id="table-count"></span>
+      </div>
+      <ul class="table-list" id="table-list">
+        <li class="empty">Loading tables…</li>
+      </ul>
+    </div>
+
+    <div class="panel" style="flex: 1; min-height: 220px;">
+      <div class="panel-head">
+        <h2>Recent Runs</h2>
+        <span class="count" id="runs-count"></span>
+      </div>
+      <ul class="run-list" id="run-list">
+        <li class="empty" style="padding: 10px 12px; color: var(--text-dim); font-size: 13px;">Loading runs…</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- Center: detail -->
+  <section class="center">
+    <div id="detail-view" class="placeholder">
+      <div>
+        <strong>Select a table</strong>
+        <span>Choose a table from the left to view its schema and rows.</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * Tiny helpers
+ * ------------------------------------------------------------------ */
+async function api(path, options) {
+  const res = await fetch(path, options);
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try {
+      const body = await res.json();
+      if (body && body.detail) detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch (_) { /* not json */ }
+    throw new Error(detail);
+  }
+  return res.json();
+}
+
+function esc(s) {
+  const map = {
+    "&": "&" + "amp;",
+    "<": "&" + "lt;",
+    ">": "&" + "gt;",
+    '"': "&" + "quot;",
+    "'": "&#39;"
+  };
+  return String(s ?? "").replace(/[&<>"']/g, (c) => map[c]);
+}
+
+function fmtVal(v) {
+  if (v === null || v === undefined) return '<span style="color: var(--text-dim);">NULL</span>';
+  return esc(v);
+}
+
+/* ------------------------------------------------------------------ *
+ * Header status
+ * ------------------------------------------------------------------ */
+function setStatus(ok, text) {
+  const el = document.getElementById("api-status");
+  const dot = ok ? "ok" : "err";
+  el.innerHTML = `<span class="dot ${dot}"></span>${esc(text)}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Tables panel
+ * ------------------------------------------------------------------ */
+let namespaceMap = {};  // table name -> namespace (for badges)
+
+async function loadTables() {
+  const list = document.getElementById("table-list");
+  const count = document.getElementById("table-count");
+  try {
+    const data = await api("/api/tables");
+    list.innerHTML = "";
+    count.textContent = data.tables.length ? String(data.tables.length) : "";
+
+    namespaceMap = {};
+    for (const ns of data.namespaces) {
+      const prefix = ns + ".";
+      for (const t of data.tables) {
+        if (t.startsWith(prefix)) namespaceMap[t] = ns;
+      }
+      // tables in the top-level namespace (no dot) map to that ns
+      if (data.tables.includes(ns)) {
+        const noPrefix = data.tables.filter((t) => t === ns && !t.includes("."));
+        namespaceMap[ns] = ns;
+        for (const n of noPrefix) namespaceMap[n] = ns;
+      }
+    }
+
+    if (!data.tables.length) {
+      list.innerHTML = '<li class="empty">No tables found. Run <code style="font-family: var(--mono);">python -m src.lakebranch.write_iceberg</code> first.</li>';
+      return;
+    }
+
+    for (const table of data.tables) {
+      const li = document.createElement("li");
+      li.dataset.table = table;
+      const isNested = table.includes(".");
+      const label = isNested ? table : table;
+      li.innerHTML = `
+        <span>${esc(label)}</span>
+        ${namespaceMap[table] && namespaceMap[table] !== table ? `<span class="ns-tag">${esc(namespaceMap[table])}</span>` : ""}
+      `;
+      li.addEventListener("click", () => {
+        document.querySelectorAll(".table-list li").forEach((el) => el.classList.remove("active"));
+        li.classList.add("active");
+        loadDetail(table);
+      });
+      list.appendChild(li);
+    }
+  } catch (err) {
+    list.innerHTML = `<li class="error">Failed to load tables: ${esc(err.message)}</li>`;
+    count.textContent = "";
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Table detail view (schema + rows + query runner)
+ * ------------------------------------------------------------------ */
+let currentTable = null;
+
+function renderSchema(fields) {
+  if (!fields.length) return "<p class='notice'>No columns.</p>";
+  let html = `<table class="grid"><thead><tr><th>Field ID</th><th>Name</th><th>Type</th><th>Required</th><th>Doc</th></tr></thead><tbody>`;
+  for (const f of fields) {
+    html += `<tr>
+      <td>${esc(f.field_id)}</td>
+      <td><strong>${esc(f.name)}</strong></td>
+      <td>${esc(f.type)}</td>
+      <td>${f.required ? "yes" : "no"}</td>
+      <td>${esc(f.doc || "")}</td>
+    </tr>`;
+  }
+  return html + "</tbody></table>";
+}
+
+function renderRows(rows, columns) {
+  if (!rows.length) return "<p class='notice'>No rows returned.</p>";
+  let html = `<table class="grid"><thead><tr>`;
+  for (const col of columns) html += `<th>${esc(col.name)}</th>`;
+  html += `</tr></thead><tbody>`;
+  for (const row of rows) {
+    html += "<tr>";
+    for (const key of Object.keys(rows[0])) {
+      html += `<td title="${esc(row[key] ?? "NULL")}">${fmtVal(row[key])}</td>`;
+    }
+    html += "</tr>";
+  }
+  return html + "</tbody></table>";
+}
+
+async function loadDetail(table) {
+  currentTable = table;
+  const view = document.getElementById("detail-view");
+  view.innerHTML = "<div class='placeholder'><div><strong>Loading…</strong></div></div>";
+
+  try {
+    const [detail, rowsResult] = await Promise.all([
+      api(`/api/tables/${encodeURIComponent(table)}`),
+      // Rows are best-effort: if the data-plane endpoint is unreachable,
+      // schema/metadata should still render.
+      api(`/api/tables/${encodeURIComponent(table)}/rows?limit=100`).catch((err) => ({ error: err.message })),
+    ]);
+    const rowsData = rowsResult.error
+      ? null
+      : rowsResult;
+
+    const snapshots = (detail.snapshots || []).map((s) =>
+      `#${s.snapshot_id} · ${new Date(s.timestamp_ms).toISOString()} · ${s.operation}`
+    ).join("\n");
+
+    const rowsHtml = rowsData
+      ? `<div class="grid-wrap">${renderRows(rowsData.rows, rowsData.columns)}</div>`
+      : `<div class="error-box">Could not load data preview: ${esc(rowsResult.error)}</div>`;
+
+    view.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <h2 style="font-size:18px; font-family: var(--mono);">${esc(table)}</h2>
+          <span style="font-size:12px; color:var(--text-dim);">${rowsData ? `rows shown: ${esc(rowsData.row_count)} / limit ${esc(rowsData.limit)}` : "data preview unavailable"}</span>
+        </div>
+
+        <!-- Time travel -->
+        <div class="panel">
+          <div class="panel-head"><h2>Time Travel</h2></div>
+          <div style="padding: 12px 16px;">
+            <p class="tt-note">Iceberg keeps a versioned history of every write — pick a snapshot to view the table as it was then. This is Lakebranch's signature feature: no other local OSS tool exposes it in a UI.</p>
+            <div class="tt-bar">
+              <select id="tt-snapshots"></select>
+              <button id="tt-go" onclick="travelToSnapshot()">View Snapshot</button>
+            </div>
+            <div id="tt-result"></div>
+          </div>
+        </div>
+
+        <!-- Snapshot diff -->
+        <div class="panel">
+          <div class="panel-head"><h2>Snapshot Diff</h2></div>
+          <div style="padding: 12px 16px;">
+            <div class="tt-bar">
+              <select id="diff-from"></select>
+              <span style="color:var(--text-dim);">→</span>
+              <select id="diff-to"></select>
+              <button id="diff-go" onclick="runDiff()">Diff</button>
+            </div>
+            <div id="diff-result"></div>
+          </div>
+        </div>
+
+        <!-- Query runner -->
+        <div class="panel">
+          <div class="panel-head"><h2>Query Runner</h2></div>
+          <div style="padding: 12px 16px;">
+            <div class="query-bar">
+              <input id="q-filter" type="text" placeholder='Filter expression, e.g. event_id > 1  or  event_type = "login"' />
+              <button id="q-run" onclick="runQuery()">Run Scan</button>
+            </div>
+            <div id="q-result"></div>
+          </div>
+        </div>
+
+        <!-- Metadata -->
+        <div class="panel">
+          <div class="panel-head"><h2>Metadata</h2></div>
+          <div style="padding: 12px 16px;">
+            <dl class="kv">
+              <dt>Location</dt><dd>${esc(detail.location)}</dd>
+              <dt>Schema ID</dt><dd>${esc(detail.schema_id)}</dd>
+              <dt>Current Snapshot</dt><dd>${esc(detail.current_snapshot_id ?? "—")}</dd>
+              <dt>Snapshots</dt><dd>${esc(detail.snapshot_count)}</dd>
+              <dt>Properties</dt><dd>${esc(Object.keys(detail.properties || {}).length)}</dd>
+            </dl>
+            ${
+              snapshots
+                ? `<p class="section-title" style="margin-top:12px;">Recent snapshots</p><pre style="font-family:var(--mono); font-size:12px; color:var(--text-dim); white-space:pre-wrap;">${esc(snapshots)}</pre>`
+                : ""
+            }
+          </div>
+        </div>
+
+        <!-- Schema -->
+        <div class="panel">
+          <div class="panel-head"><h2>Schema</h2></div>
+          <div style="padding: 12px 16px;"><div class="grid-wrap">${renderSchema(detail.fields)}</div></div>
+        </div>
+
+        <!-- Rows -->
+        <div class="panel">
+          <div class="panel-head"><h2>Data Preview${rowsData ? ` (first ${esc(rowsData.limit)} rows)` : ""}</h2></div>
+          <div style="padding: 12px 16px;">${rowsHtml}</div>
+        </div>
+      </div>
+    `;
+
+    // Populate the time-travel / snapshot-diff dropdowns from the detail data.
+    populateSnapshotControls(detail);
+  } catch (err) {
+    view.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+  }
+}
+
+async function runQuery() {
+  if (!currentTable) return;
+  const filter = document.getElementById("q-filter").value.trim();
+  const btn = document.getElementById("q-run");
+  const result = document.getElementById("q-result");
+  btn.disabled = true;
+  result.innerHTML = "<p class='notice'>Scanning…</p>";
+  try {
+    const data = await api("/api/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ table: currentTable, filter, limit: 100 }),
+    });
+    result.innerHTML = `
+      <p class="notice">${esc(data.row_count)} row(s) returned${data.filter ? ` for filter <code style="font-family:var(--mono);">${esc(data.filter)}</code>` : ""}</p>
+      ${data.row_count ? `<div class="grid-wrap">${renderRows(data.rows, data.columns)}</div>` : ""}
+    `;
+  } catch (err) {
+    result.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Time travel + snapshot diff (Lakebranch signature feature)
+ * ------------------------------------------------------------------ */
+function snapshotLabel(s) {
+  const t = s.timestamp_ms ? new Date(s.timestamp_ms).toISOString() : "?";
+  return `#${s.snapshot_id} · ${t} · ${s.operation}`;
+}
+
+function populateSnapshotControls(detail) {
+  const snaps = detail.snapshots || [];
+  const optHtml = (s) => `<option value="${esc(s.snapshot_id)}">${esc(snapshotLabel(s))}</option>`;
+
+  const ttSel = document.getElementById("tt-snapshots");
+  const fromSel = document.getElementById("diff-from");
+  const toSel = document.getElementById("diff-to");
+  if (!ttSel || !fromSel || !toSel) return;
+
+  ttSel.innerHTML = snaps.length ? snaps.map(optHtml).join("") : '<option value="">No snapshots yet</option>';
+  fromSel.innerHTML = snaps.length ? snaps.map(optHtml).join("") : '<option value="">No snapshots</option>';
+  toSel.innerHTML = snaps.length ? snaps.map(optHtml).join("") : '<option value="">No snapshots</option>';
+
+  // Default: compare earliest -> latest (or last two)
+  if (snaps.length >= 2) {
+    fromSel.selectedIndex = 0;
+    toSel.selectedIndex = snaps.length - 1;
+  } else if (snaps.length === 1) {
+    fromSel.selectedIndex = 0;
+    toSel.selectedIndex = 0;
+  }
+}
+
+async function travelToSnapshot() {
+  if (!currentTable) return;
+  const sel = document.getElementById("tt-snapshots");
+  const btn = document.getElementById("tt-go");
+  const result = document.getElementById("tt-result");
+  const sid = sel.value;
+  if (!sid) { result.innerHTML = "<p class='notice'>No snapshots to view.</p>"; return; }
+
+  btn.disabled = true;
+  result.innerHTML = "<p class='notice'>Loading snapshot…</p>";
+  try {
+    const data = await api(`/api/tables/${encodeURIComponent(currentTable)}/rows?limit=100&snapshot_id=${encodeURIComponent(sid)}`);
+    result.innerHTML = `
+      <p class="notice">Snapshot #${esc(data.snapshot_id)} — ${esc(data.row_count)} row(s) as of then</p>
+      ${data.row_count ? `<div class="grid-wrap">${renderRows(data.rows, data.columns)}</div>` : ""}
+    `;
+  } catch (err) {
+    result.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderDiffTable(rows, label, cls) {
+  if (!rows.length) return `<p class="notice">${esc(label)}: none</p>`;
+  const cols = Object.keys(rows[0]);
+  let html = `<table class="grid"><thead><tr><th></th>`;
+  for (const c of cols) html += `<th>${esc(c)}</th>`;
+  html += `</tr></thead><tbody>`;
+  for (const row of rows) {
+    html += `<tr class="${cls}"><td><span class="tag">${cls === "diff-added" ? "ADDED" : "REMOVED"}</span></td>`;
+    for (const c of cols) html += `<td>${fmtVal(row[c])}</td>`;
+    html += "</tr>";
+  }
+  return html + "</tbody></table>";
+}
+
+async function runDiff() {
+  if (!currentTable) return;
+  const fromSel = document.getElementById("diff-from");
+  const toSel = document.getElementById("diff-to");
+  const btn = document.getElementById("diff-go");
+  const result = document.getElementById("diff-result");
+  const from = fromSel.value, to = toSel.value;
+  if (!from || !to) { result.innerHTML = "<p class='notice'>Pick two snapshots to diff.</p>"; return; }
+
+  btn.disabled = true;
+  result.innerHTML = "<p class='notice'>Diffing…</p>";
+  try {
+    const data = await api(
+      `/api/tables/${encodeURIComponent(currentTable)}/diff?from_snapshot_id=${encodeURIComponent(from)}&to_snapshot_id=${encodeURIComponent(to)}`
+    );
+    result.innerHTML = `
+      <p class="tt-note">Snapshot ${esc(data.from_snapshot_id)} → ${esc(data.to_snapshot_id)} ·
+        rows ${esc(data.from_row_count)} → ${esc(data.to_row_count)}</p>
+      ${renderDiffTable(data.added_rows, "Added rows", "diff-added")}
+      ${renderDiffTable(data.removed_rows, "Removed rows", "diff-removed")}
+    `;
+  } catch (err) {
+    result.innerHTML = `<div class="error-box">${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Runs panel
+ * ------------------------------------------------------------------ */
+async function loadRuns() {
+  const list = document.getElementById("run-list");
+  const count = document.getElementById("runs-count");
+  try {
+    const data = await api("/api/runs");
+    count.textContent = data.count ? String(data.count) : "";
+    if (!data.runs.length) {
+      list.innerHTML = '<li class="empty" style="padding: 10px 12px; color: var(--text-dim); font-size: 13px;">No runs yet. Run <code style="font-family:var(--mono);">python -m src.lakebranch.write_iceberg</code> to record one.</li>';
+      return;
+    }
+    list.innerHTML = "";
+    for (const r of data.runs) {
+      const li = document.createElement("li");
+      li.className = "run-item";
+      const statusClass = r.status === "success" ? "success" : "failed";
+      li.innerHTML = `
+        <div class="top">
+          <span class="pipeline">${esc(r.pipeline)}</span>
+          <span class="status-pill ${statusClass}">${esc(r.status)}</span>
+        </div>
+        <div class="meta">
+          #${esc(r.id)} · ${esc(r.started_at ?? "—")} · ${esc(r.profile)} · ${esc(r.warehouse)}
+          ${r.rows_written != null ? ` · rows: ${esc(r.rows_written)}` : ""}
+          ${r.duration_ms != null ? ` · ${esc(r.duration_ms)} ms` : ""}
+          ${r.error ? ` · <span style="color:var(--danger);">${esc(r.error)}</span>` : ""}
+        </div>
+      `;
+      li.title = r.error || "";
+      list.appendChild(li);
+    }
+  } catch (err) {
+    list.innerHTML = `<li class="empty" style="padding: 10px 12px; color: var(--danger); font-size: 13px;">Failed to load runs: ${esc(err.message)}</li>`;
+    count.textContent = "";
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Boot
+ * ------------------------------------------------------------------ */
+async function boot() {
+  try {
+    await Promise.all([loadTables(), loadRuns()]);
+    setStatus(true, "connected");
+  } catch (err) {
+    setStatus(false, "API unreachable: " + err.message);
+  }
+}
+
+boot();
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a feature or improvement for Lakebranch
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting! Please search existing issues first to avoid duplicates.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The problem or gap you're trying to address
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the feature or change clearly
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds or alternative approaches you've thought of
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, links, or extra details
