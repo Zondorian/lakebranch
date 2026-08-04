@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **DuckDB SQL query engine** (`src/lakebranch/sql.py`): real SQL (SELECT/JOIN/GROUP BY/subqueries) over the catalog's Iceberg tables via DuckDB. Each table is registered as a sanitized view (`db.events` → `db_events`) plus its quoted dotted alias (`"db.events"`). Docker-independent — works with every catalog (`nessie` / `sqlite`) and storage (`seaweedfs` / `minio` / `aws-s3` / `filesystem`) profile. Exposed as the `lakebranch sql` CLI command and `POST /api/sql` (returns `query`, `row_count`, `columns`, `rows`, `tables` mapping, `duration_ms`).
+- **GUI SQL panel**: a "SQL" panel in the single-page UI runs arbitrary SQL over every Iceberg table in the catalog via `POST /api/sql`, renders the result grid, and shows which view names map to which tables.
+- **Docker-free SQL engine tests** (`tests/test_sql.py`): cover sanitized view names, quoted dotted aliases, GROUP BY aggregates, real SQL JOINs across tables, `--limit` truncation, and error handling against the SQLite catalog + filesystem warehouse. `POST /api/sql` is also covered in `tests/test_api_integration.py` (valid aggregates, dotted alias, invalid-query 422).
 - **SQLite catalog profile** (`CATALOG_PROFILE=sqlite`): PyIceberg `SqlCatalog` backed by a single local `.db` file. Pairs with `STORAGE_PROFILE=filesystem` for a **fully Docker-free stack** — the entire end-to-end write/query pipeline runs with just `pip install`, no containers, no network.
 - **`init_catalog()` catalog routing** (`src/lakebranch/catalog.py`): routes to the Nessie REST catalog (`nessie`, default) or the SQLite catalog (`sqlite`) based on `CATALOG_PROFILE`. Handles Windows/macOS/Linux local warehouse paths safely (relative-path rendering with a `file://` cross-drive fallback).
 - **Docker-free quickstart** in the README: `STORAGE_PROFILE=filesystem CATALOG_PROFILE=sqlite` → `lakebranch pipeline` works with no Docker at all. The GUI, `init-demo`, run-logging, and Airflow provider all work with this profile.
@@ -32,7 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned
 
 - GUI: Nessie branch management (create/merge branches)
-- Bundled query engine (e.g. DuckDB via pyiceberg) so quickstart supports SQL out of the box
 - GCS and ADLS storage profiles
 - PostgreSQL catalog support
 

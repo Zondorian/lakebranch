@@ -246,6 +246,25 @@ The `write_iceberg` pipeline uses the logger internally via a context manager; t
 
 > **Important — this is telemetry, not orchestration.** The run logger records *what happened* after the fact. It does **not** schedule, chain, retry, or manage dependencies between runs — that would be a DAG orchestrator, which Lakebranch deliberately does not include. Airflow remains a swappable *external* execution layer (see [Orchestration (Airflow)](#orchestration-airflow)); Lakebranch provides the run log that Airflow-driven pipelines write to. Failed runs are recorded with `status=failed` and the exception message in `error`; the exception is still raised to the caller as normal.
 
+## SQL Query Engine (DuckDB)
+
+Lakebranch bundles a **SQL query engine** (`src/lakebranch/sql.py`) that runs real SQL over the catalog's Iceberg tables via **DuckDB** — plain `SELECT`, `JOIN`s across tables, `GROUP BY` aggregates, subqueries, and anything else DuckDB supports. It is **Docker-independent**: it works with both catalog profiles (`nessie` / `sqlite`) and every storage profile (`seaweedfs` / `minio` / `aws-s3` / `filesystem`), because it loads each table's current snapshot via PyIceberg's catalog abstraction — no DuckDB `iceberg` extension, no S3 credential plumbing.
+
+Each Iceberg table is registered as a DuckDB view under two names:
+
+- A **sanitized view name** — `db.events` → `db_events` (the canonical name for SQL)
+- A **quoted, dotted alias** — `"db.events"`, so `SELECT * FROM "db.events"` also works
+
+### Run from the CLI
+
+```bash
+lakebranch sql "SELECT event_type, COUNT(*) AS n FROM db_events GROUP BY 1 ORDER BY 1"
+# ...or as a module:
+python -m src.lakebranch.sql "SELECT u.email, COUNT(o.order_id) AS orders FROM db_users u LEFT JOIN db_orders o ON u.user_id = o.user_id GROUP BY u.email"
+```
+
+Pass `--limit N` to cap the number of result rows (default: 1000). The engine also drives the GUI's **SQL** panel and the `POST /api/sql` endpoint, so the quickstart supports SQL out of the box — Docker-free included.
+
 ## Lakebranch GUI (Developer Preview)
 
 Lakebranch ships a **web-based developer preview** — a FastAPI backend + a single-page static UI that makes the lakehouse explorable *and writable* in the browser: tables, row previews, time travel, snapshot diffs, a query runner, CSV/Parquet/JSON import, and run history. It is intentionally minimal and clearly marked as a dev preview: no auth, no user management, no production hardening.
@@ -259,6 +278,7 @@ Lakebranch ships a **web-based developer preview** — a FastAPI backend + a sin
 - **Time Travel** — Lakebranch's signature feature: pick a past Iceberg snapshot and view the table as it was then (`GET /api/tables/{table}/rows?snapshot_id=…`). No other local OSS tool exposes Iceberg snapshot history in a UI.
 - **Snapshot Diff** — compare two snapshots and see exactly which rows were added/removed between them (`GET /api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…`)
 - **Query runner** — run an Iceberg scan with a SQL-like row filter (`POST /api/query`, e.g. `event_id > 1` or `event_type = 'login'`)
+- **SQL query runner** — run arbitrary SQL (JOINs, GROUP BY, subqueries) over **every** table in the catalog via DuckDB (`POST /api/sql`). Tables are exposed as sanitized views (`db.events` → `db_events`) and quoted dotted aliases (`"db.events"`)
 - **Import Data** — upload a CSV/Parquet file or paste JSON rows and write them to a table (`append` / `overwrite`), creating the table automatically (schema inferred) if it does not exist. Writes are recorded in the run log (`POST /api/tables/{table}/data`, `POST /api/tables/{table}/rows`, `POST /api/namespaces`)
 - **Recent runs** — the pipeline run-log entries from [Pipeline Run Logging](#pipeline-run-logging) (`GET /api/runs`)
 
@@ -298,6 +318,7 @@ curl http://localhost:8787/api/runs     # run-log entries (requires the run-logg
 | `GET` | `/api/tables/{table}/rows?snapshot_id=…` | **Time travel** — scan the table as it was at a past Iceberg snapshot |
 | `GET` | `/api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…` | **Snapshot diff** — rows added/removed between two snapshots |
 | `POST` | `/api/query` | Run an Iceberg scan with a filter expression (body: `{"table": "db.events", "filter": "event_id > 1", "limit": 100}`) |
+| `POST` | `/api/sql` | Run arbitrary SQL (JOINs, GROUP BY, subqueries) over every Iceberg table via DuckDB (body: `{"query": "SELECT event_type, COUNT(*) AS n FROM db_events GROUP BY 1", "limit": 1000}`). Returns the result rows/columns plus the view-name → table-id mapping |
 | `POST` | `/api/namespaces` | Create a namespace (idempotent) |
 | `POST` | `/api/tables/{table}/rows` | Write JSON rows (append/overwrite) — creates the table (schema inferred) if missing |
 | `POST` | `/api/tables/{table}/data` | Upload a CSV/Parquet file and append/overwrite — creates the table if missing (multipart: `file`, `mode`) |
@@ -580,11 +601,12 @@ Lakebranch/
         │   └── app.py            # FastAPI app (tables, rows, diff, query, runs; :8787)
         ├── ui/                   # Static GUI (developer preview)
         │   └── index.html        # Single-page UI (no build step)
-        ├── cli.py                # `lakebranch` CLI (up/down/pipeline/runs/ui/init-demo)
+        ├── cli.py                # `lakebranch` CLI (up/down/pipeline/runs/ui/init-demo/sql)
         ├── config.py             # Profile-aware config loader
         ├── catalog.py            # Shared catalog helpers (init_catalog / ensure_namespace / ensure_table)
         ├── init_demo.py          # Multi-table demo dataset loader
         ├── runs.py               # Pipeline run-log (telemetry) layer
+        ├── sql.py                # DuckDB SQL-over-Iceberg engine (lakebranch sql / POST /api/sql)
         ├── write_iceberg.py      # End-to-end writer/query script
         └── storage/
             ├── __init__.py       # Storage abstraction exports

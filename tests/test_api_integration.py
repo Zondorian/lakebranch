@@ -133,3 +133,45 @@ def test_api_query_runner(events_snapshots):
     body = resp.json()
     assert body["row_count"] == 2
     assert {row["event_id"] for row in body["rows"]} == {2, 3}
+
+
+def test_api_sql_runner(events_snapshots):
+    """POST /api/sql runs real SQL (aggregates) over the Iceberg table."""
+    client, _, _ = events_snapshots
+
+    resp = client.post(
+        "/api/sql",
+        json={
+            "query": "SELECT event_type, COUNT(*) AS n FROM db_events GROUP BY 1 ORDER BY 1",
+            "limit": 100,
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["row_count"] == 3
+    by_type = {row["event_type"]: row["n"] for row in body["rows"]}
+    assert by_type == {"login": 1, "logout": 1, "purchase": 1}
+    # The response includes the view-name → table-id mapping for the UI.
+    assert body["tables"] == {"db_events": "db.events"}
+
+
+def test_api_sql_quoted_dotted_alias(events_snapshots):
+    """The quoted, dotted table identifier is also queryable via /api/sql."""
+    client, _, _ = events_snapshots
+
+    resp = client.post(
+        "/api/sql",
+        json={"query": 'SELECT event_id FROM "db.events" ORDER BY event_id'},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [row["event_id"] for row in body["rows"]] == [1, 2, 3]
+
+
+def test_api_sql_rejects_invalid_query(events_snapshots):
+    """A bad SQL statement returns a 422 with the DuckDB error detail."""
+    client, _, _ = events_snapshots
+
+    resp = client.post("/api/sql", json={"query": "SELECT * FROM missing_table"})
+    assert resp.status_code == 422
+    assert "SQL query failed" in resp.json()["detail"]

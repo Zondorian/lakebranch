@@ -12,6 +12,7 @@ This API exposes:
 - ``GET  /api/tables/{table}/rows?snapshot_id=…`` — time-travel scan at a past snapshot
 - ``GET  /api/tables/{table}/diff?from_snapshot_id=…&to_snapshot_id=…`` — diff two snapshots
 - ``POST /api/query``             — run an Iceberg scan with a filter expression
+- ``POST /api/sql``               — run an arbitrary SQL query over Iceberg via DuckDB (JOINs, GROUP BY, subqueries)
 - ``POST /api/namespaces``        — create a namespace
 - ``POST /api/tables/{table}/data`` — upload CSV/Parquet and append/overwrite (creates the table if missing)
 - ``POST /api/tables/{table}/rows`` — write JSON rows (append/overwrite; creates the table if missing)
@@ -26,9 +27,6 @@ Run:
 from __future__ import annotations
 
 import io
-import math
-from datetime import date, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -49,7 +47,9 @@ from pyiceberg.table import Table
 
 from src.lakebranch.catalog import ensure_namespace, init_catalog, namespace_of
 from src.lakebranch.config import load_config
+from src.lakebranch.jsonutil import df_to_rows, json_safe
 from src.lakebranch.runs import log_run, recent_runs
+from src.lakebranch.sql import run_sql
 
 UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 
@@ -105,40 +105,10 @@ def _load_table(table_name: str) -> Table:
 
 # -----------------------------------------------------------------------------
 # JSON-friendly serialization helpers
+# (promoted to src.lakebranch.jsonutil for CLI + API reuse)
 # -----------------------------------------------------------------------------
-def _json_safe(value: Any) -> Any:
-    """Convert a pandas/arrow/scalar value into a JSON-serializable Python value."""
-    if value is None:
-        return None
-    if isinstance(value, pd.Timestamp):
-        return value.isoformat()
-    if isinstance(value, (datetime, date)):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, bytes):
-        try:
-            return value.decode("utf-8")
-        except UnicodeDecodeError:
-            return value.hex()
-    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
-        return None
-    # numpy scalar types (int64, float64, bool, …) expose .item()
-    converter = getattr(value, "item", None)
-    if callable(converter):
-        try:
-            converted = converter()
-        except (ValueError, TypeError):
-            return str(value)
-        return _json_safe(converted)
-    return value
-
-
-def _df_to_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
-    """Convert a pandas DataFrame into a list of JSON-safe row dicts."""
-    df = df.where(pd.notnull(df), None)  # NaN → None
-    records = df.to_dict(orient="records")
-    return [{k: _json_safe(v) for k, v in row.items()} for row in records]
+_json_safe = json_safe
+_df_to_rows = df_to_rows
 
 
 # -----------------------------------------------------------------------------
@@ -342,6 +312,35 @@ def run_query(request: QueryRequest) -> dict[str, Any]:
         "columns": [{"name": col, "type": str(dtype)} for col, dtype in df.dtypes.items()],
         "rows": _df_to_rows(df),
     }
+
+
+class SqlRequest(BaseModel):
+    """Body for ``POST /api/sql`` — an arbitrary DuckDB SQL statement."""
+
+    query: str = Field(..., description="SQL statement, e.g. 'SELECT * FROM db_events'")
+    limit: int = Field(
+        default=1000,
+        ge=1,
+        le=10000,
+        description="Max result rows to return",
+    )
+
+
+@app.post("/api/sql")
+def run_sql_api(request: SqlRequest) -> dict[str, Any]:
+    """Run an arbitrary SQL query over the catalog's Iceberg tables via DuckDB.
+
+    Iceberg tables are exposed as views named by sanitizing the dotted table
+    id (``db.events`` → ``db_events``) and as quoted dotted aliases
+    (``"db.events"``). The result includes the view-name mapping so the UI can
+    show users exactly which names are queryable.
+    """
+    try:
+        return run_sql(request.query, limit=request.limit)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"SQL query failed: {exc}") from exc
 
 
 # -----------------------------------------------------------------------------

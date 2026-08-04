@@ -12,6 +12,7 @@ Subcommands:
     lakebranch runs         Show the 10 most recent pipeline runs
     lakebranch ui           Start the web UI (FastAPI dev server)
     lakebranch init-demo    Load the demo dataset
+    lakebranch sql          Run a SQL query over Iceberg via DuckDB
     lakebranch down         Stop the Docker stack
 
 Install the console script with::
@@ -103,6 +104,18 @@ def cmd_init_demo(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sql(args: argparse.Namespace) -> int:
+    """Run a SQL query over the catalog's Iceberg tables via DuckDB."""
+    from src.lakebranch.sql import print_sql_result, run_sql
+
+    try:
+        print_sql_result(run_sql(args.query, limit=args.limit))
+    except KeyboardInterrupt:
+        print("[cli] Interrupted.", file=sys.stderr)
+        return 130
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="lakebranch",
@@ -134,6 +147,19 @@ def build_parser() -> argparse.ArgumentParser:
         "init-demo",
         help="Load the demo dataset",
     ).set_defaults(func=cmd_init_demo)
+
+    p_sql = sub.add_parser(
+        "sql",
+        help="Run a SQL query over Iceberg via DuckDB",
+    )
+    p_sql.add_argument("query", help='SQL query, e.g. "SELECT * FROM db_events"')
+    p_sql.add_argument(
+        "--limit",
+        type=int,
+        default=1000,
+        help="Max result rows (default: 1000)",
+    )
+    p_sql.set_defaults(func=cmd_sql)
 
     return parser
 
